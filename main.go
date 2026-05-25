@@ -1,4 +1,4 @@
-package api
+package main
 
 import (
         "archive/tar"
@@ -6,176 +6,74 @@ import (
         "encoding/json"
         "fmt"
         "io"
+        "log"
         "net/http"
         "os"
         "path/filepath"
         "strings"
-        "sync"
 
         "elma365-diagnostics/analyzer"
+        "elma365-diagnostics/api"
         "elma365-diagnostics/models"
+        "github.com/gorilla/mux"
 )
 
-var (
-        currentReport *models.DiagnosticReport
-        workDir       string
-        mu            sync.RWMutex
-)
+var currentReport *models.DiagnosticReport
+var workDir string
 
-func HealthHandler(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(models.HealthResponse{
-                Status:  "healthy",
-                Service: "elma365-diagnostics",
-                Version: "1.5.4",
-        })
+func main() {
+        port := os.Getenv("PORT")
+        if port == "" {
+                port = "8080"
+        }
+
+        // Проверка режима работы
+        if len(os.Args) > 1 && os.Args[1] == "analyze" {
+                runAnalyzerMode()
+                return
+        }
+
+        // Серверный режим
+        r := mux.NewRouter()
+
+        // API endpoints
+        r.HandleFunc("/api/health", api.HealthHandler).Methods("GET")
+        r.HandleFunc("/api/report", api.GetReportHandler).Methods("GET")
+        r.HandleFunc("/api/logs", api.GetLogsHandler).Methods("GET")
+        r.HandleFunc("/api/resources", api.GetResourcesHandler).Methods("GET")
+        r.HandleFunc("/api/issues", api.GetIssuesHandler).Methods("GET")
+        r.HandleFunc("/api/events", api.GetEventsHandler).Methods("GET")
+        r.HandleFunc("/api/upload", api.UploadHandler).Methods("POST")
+
+        // Статические файлы (UI)
+        fs := http.FileServer(http.Dir("./static"))
+        r.PathPrefix("/").Handler(fs)
+
+        fmt.Printf("🚀 ELMA365 Diagnostics Server запущен на порту %s\n", port)
+        fmt.Println("📊 Откройте http://localhost:" + port)
+        log.Fatal(http.ListenAndServe(":"+port, r))
 }
 
-func GetReportHandler(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        mu.RLock()
-        defer mu.RUnlock()
-
-        if currentReport == nil {
-                json.NewEncoder(w).Encode(map[string]string{"status": "no_data", "message": "Загрузите данные диагностики"})
-                return
-        }
-        json.NewEncoder(w).Encode(currentReport)
-}
-
-func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        pod := r.URL.Query().Get("pod")
-        container := r.URL.Query().Get("container")
-        search := r.URL.Query().Get("search")
-        showErrors := r.URL.Query().Get("errors") == "true"
-
-        mu.RLock()
-        defer mu.RUnlock()
-
-        if currentReport == nil || currentReport.Logs == nil {
-                json.NewEncoder(w).Encode([]interface{}{})
-                return
-        }
-
-        var result []models.LogEntry
-        for podName, entries := range currentReport.Logs {
-                if pod != "" && !strings.Contains(podName, pod) {
-                        continue
-                }
-                for _, entry := range entries {
-                        if container != "" && !strings.Contains(entry.Container, container) {
-                                continue
-                        }
-                        if search != "" && !strings.Contains(strings.ToLower(entry.Content), strings.ToLower(search)) {
-                                continue
-                        }
-                        if showErrors && entry.Errors == 0 {
-                                continue
-                        }
-                        result = append(result, entry)
-                }
-        }
-
-        json.NewEncoder(w).Encode(result)
-}
-
-func GetResourcesHandler(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        mu.RLock()
-        defer mu.RUnlock()
-
-        if currentReport == nil {
-                json.NewEncoder(w).Encode(map[string]interface{}{"status": "no_data"})
-                return
-        }
-        json.NewEncoder(w).Encode(currentReport.Resources)
-}
-
-func GetIssuesHandler(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        mu.RLock()
-        defer mu.RUnlock()
-
-        if currentReport == nil {
-                json.NewEncoder(w).Encode([]interface{}{})
-                return
-        }
-        json.NewEncoder(w).Encode(currentReport.Issues)
-}
-
-func GetEventsHandler(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        eventType := r.URL.Query().Get("type") // all, warning, normal
-
-        mu.RLock()
-        defer mu.RUnlock()
-
-        if currentReport == nil || currentReport.Events == nil {
-                json.NewEncoder(w).Encode([]interface{}{})
-                return
-        }
-
-        var result []models.K8sEvent
-        for _, event := range currentReport.Events {
-                if eventType == "warning" && event.Type != "Warning" {
-                        continue
-                }
-                if eventType == "normal" && event.Type != "Normal" {
-                        continue
-                }
-                result = append(result, event)
-        }
-
-        json.NewEncoder(w).Encode(result)
-}
-
-func UploadHandler(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-
-        file, header, err := r.FormFile("file")
-        if err != nil {
-                http.Error(w, `{"error": "Не удалось получить файл"}`, http.StatusBadRequest)
-                return
-        }
-        defer file.Close()
-
-        fmt.Printf("📥 Загрузка файла: %s\n", header.Filename)
-
-        // Создание временной директории
-        tmpDir, err := os.MkdirTemp("", "diag_upload_*")
-        if err != nil {
-                http.Error(w, `{"error": "Ошибка создания временной директории"}`, http.StatusInternalServerError)
-                return
-        }
-        defer os.RemoveAll(tmpDir)
+func runAnalyzerMode() {
+        // Чтение архива из stdin
+        workDir = "/tmp/diag_analysis"
+        os.RemoveAll(workDir)
+        os.MkdirAll(workDir, 0755)
 
         // Распаковка архива
-        if err := extractArchive(file, tmpDir); err != nil {
-                http.Error(w, fmt.Sprintf(`{"error": "Ошибка распаковки: %v"}`, err), http.StatusBadRequest)
-                return
+        if err := extractArchive(os.Stdin, workDir); err != nil {
+                log.Fatalf("Ошибка распаковки: %v", err)
         }
 
         // Анализ данных
-        report, err := analyzeData(tmpDir)
+        report, err := analyzeData(workDir)
         if err != nil {
-                http.Error(w, fmt.Sprintf(`{"error": "Ошибка анализа: %v"}`, err), http.StatusInternalServerError)
-                return
+                log.Fatalf("Ошибка анализа: %v", err)
         }
 
-        // Сохранение отчета
-        mu.Lock()
-        currentReport = report
-        workDir = tmpDir
-        mu.Unlock()
-
-        fmt.Printf("✅ Данные успешно проанализированы. Найдено проблем: %d\n", len(report.Issues))
-
-        json.NewEncoder(w).Encode(models.UploadResponse{
-                Status:  "success",
-                Message: fmt.Sprintf("Архив обработан. Найдено %d проблем, %d подов, %d событий", len(report.Issues), report.ClusterInfo.PodsCount, len(report.Events)),
-                Report:  report,
-        })
+        // Вывод JSON отчета
+        jsonData, _ := json.MarshalIndent(report, "", "  ")
+        fmt.Println(string(jsonData))
 }
 
 func extractArchive(reader io.Reader, dest string) error {
@@ -226,33 +124,17 @@ func analyzeData(dir string) (*models.DiagnosticReport, error) {
         // Анализ проблем
         analyzerIssues, err := analyzer.AnalyzeIssues(dir)
         if err == nil {
-                // Конвертация типов
                 for _, issue := range analyzerIssues {
-                        report.Issues = append(report.Issues, models.Issue{
-                                Type:           issue.Type,
-                                Severity:       issue.Severity,
-                                Pod:            issue.Pod,
-                                Container:      issue.Container,
-                                Pattern:        issue.Pattern,
-                                Count:          issue.Count,
-                                Status:         issue.Status,
-                                Reason:         issue.Reason,
-                                Message:        issue.Message,
-                                Correlation:    issue.Correlation,
-                                Recommendation: issue.Recommendation,
-                        })
+                        report.Issues = append(report.Issues, models.Issue(issue))
                 }
         }
 
-        // Парсинг логов
+        // Парсинг логов и ресурсов (упрощенно для CLI режима)
         report.Logs = parseLogs(dir)
-
-        // Парсинг ресурсов
         report.Resources = parseResources(dir)
 
-        // Парсинг событий
-        report.Events = parseEvents(dir)
-
+        currentReport = report
+        workDir = dir
         return report, nil
 }
 
@@ -374,37 +256,6 @@ func parseResources(dir string) models.ResourceSummary {
         }
 
         return resources
-}
-
-func parseEvents(dir string) []models.K8sEvent {
-        var events []models.K8sEvent
-
-        eventsFile := filepath.Join(dir, "events", "events_all.txt")
-        data, err := os.ReadFile(eventsFile)
-        if err != nil {
-                return events
-        }
-
-        lines := strings.Split(string(data), "\n")
-        for i, line := range lines {
-                if i == 0 || strings.TrimSpace(line) == "" {
-                        continue
-                }
-                // Формат: LAST SEEN TYPE REASON OBJECT MESSAGE
-                fields := strings.Fields(line)
-                if len(fields) >= 6 {
-                        event := models.K8sEvent{
-                                LastTimestamp: fields[0],
-                                Type:          fields[1],
-                                Reason:        fields[2],
-                                Object:        fields[3],
-                                Message:       strings.Join(fields[4:], " "),
-                        }
-                        events = append(events, event)
-                }
-        }
-
-        return events
 }
 
 func parseInt(s string) int {

@@ -1,4 +1,3 @@
-
 package analyzer
 
 import (
@@ -8,17 +7,18 @@ import (
         "strings"
 )
 
+// Issue представляет проблему в системе
 type Issue struct {
-        Type     string `json:"type"`
-        Severity string `json:"severity"`
-        Pod      string `json:"pod,omitempty"`
-        Container string `json:"container,omitempty"`
-        Pattern  string `json:"pattern,omitempty"`
-        Count    int    `json:"count,omitempty"`
-        Status   string `json:"status,omitempty"`
-        Reason   string `json:"reason,omitempty"`
-        Message  string `json:"message"`
-        Correlation string `json:"correlation,omitempty"`
+        Type           string `json:"type"`
+        Severity       string `json:"severity"`
+        Pod            string `json:"pod,omitempty"`
+        Container      string `json:"container,omitempty"`
+        Pattern        string `json:"pattern,omitempty"`
+        Count          int    `json:"count,omitempty"`
+        Status         string `json:"status,omitempty"`
+        Reason         string `json:"reason,omitempty"`
+        Message        string `json:"message"`
+        Correlation    string `json:"correlation,omitempty"`
         Recommendation string `json:"recommendation,omitempty"`
 }
 

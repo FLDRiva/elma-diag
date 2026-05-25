@@ -1,7 +1,4 @@
---- diag-server/Dockerfile 
 
-
-+++ diag-server/Dockerfile 
      1	FROM golang:1.21-alpine AS builder
      2	
      3	WORKDIR /app

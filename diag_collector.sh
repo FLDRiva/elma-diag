@@ -1,7 +1,3 @@
---- diag_collector.sh 
-
-
-+++ diag_collector.sh 
 #!/bin/bash
 
 # Скрипт сбора диагностической информации для ELMA365 в Kubernetes
