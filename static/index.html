@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Диагностика ELMA365</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        header h1 {
+            color: #667eea;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .tab-btn {
+            padding: 12px 24px;
+            background: rgba(255,255,255,0.2);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .tab-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+        }
+
+        .tab-btn.active {
+            background: white;
+            color: #667eea;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+
+        .tab-content {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .info-card {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+
+        .info-card h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+
+        .info-card p {
+            color: #555;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+
+        .issue-card {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+        }
+
+        .issue-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transform: translateY(-2px);
+        }
+
+        .issue-critical {
+            border-left: 4px solid #dc3545;
+        }
+
+        .issue-high {
+            border-left: 4px solid #fd7e14;
+        }
+
+        .issue-medium {
+            border-left: 4px solid #ffc107;
+        }
+
+        .issue-low {
+            border-left: 4px solid #28a745;
+        }
+
+        .severity-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .severity-critical { background: #dc3545; color: white; }
+        .severity-high { background: #fd7e14; color: white; }
+        .severity-medium { background: #ffc107; color: #333; }
+        .severity-low { background: #28a745; color: white; }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 48px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        th {
+            background: #f8f9fa;
+            color: #667eea;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .code-block {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+
+        .upload-area {
+            border: 2px dashed #667eea;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .upload-area:hover {
+            background: rgba(102, 126, 234, 0.1);
+            border-color: #764ba2;
+        }
+
+        .help-text {
+            color: #666;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 Диагностика ELMA365</h1>
+            <p>Интеллектуальная система анализа проблем кластера Kubernetes для новичков и опытных специалистов</p>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showTab('overview')">📊 Обзор</button>
+            <button class="tab-btn" onclick="showTab('logs')">📝 Логи сервисов</button>
+            <button class="tab-btn" onclick="showTab('load')">⚡ Нагрузка</button>
+            <button class="tab-btn" onclick="showTab('issues')">⚠️ Проблемы</button>
+            <button class="tab-btn" onclick="showTab('events')">🔔 События</button>
+            <button class="tab-btn" onclick="showTab('storage')">💾 Хранилище</button>
+            <button class="tab-btn" onclick="showTab('upload')">📤 Загрузка</button>
+        </div>
+
+        <!-- Вкладка ОБЗОР -->
+        <div id="overview" class="tab-content active">
+            <div class="info-card">
+                <h3>ℹ️ Что здесь?</h3>
+                <p>На этой странице вы видите общую сводку по состоянию системы ELMA365 в Kubernetes. Здесь показаны основные метрики: количество подов, узлов, проблемы и их критичность. Используйте эту вкладку для быстрой оценки здоровья системы.</p>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number" id="pods-count">0</div>
+                    <div class="stat-label">Подов в namespace</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="nodes-count">0</div>
+                    <div class="stat-label">Узлов кластера</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="issues-count">0</div>
+                    <div class="stat-label">Обнаружено проблем</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="hpa-count">0</div>
+                    <div class="stat-label">HPA (автомасштабирование)</div>
+                </div>
+            </div>
+
+            <h3 style="margin-bottom: 15px; color: #667eea;">Последние проблемы</h3>
+            <div id="recent-issues">
+                <p style="color: #666;">Загрузите данные диагностики для отображения проблем</p>
+            </div>
+        </div>
+
+        <!-- Вкладка ЛОГИ -->
+        <div id="logs" class="tab-content">
+            <div class="info-card">
+                <h3>ℹ️ Как работать с логами?</h3>
+                <p>Здесь собраны логи всех контейнеров ваших сервисов ELMA365. Вы можете фильтровать логи по имени пода или контейнера. Система автоматически подсвечивает ошибки (Error, Exception, Fatal) и предупреждения. Для анализа проблем используйте поиск по тексту ошибки.</p>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <input type="text" id="log-filter" placeholder="Фильтр по названию пода или контейнера..."
+                       style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+            </div>
+
+            <div id="logs-container">
+                <p style="color: #666;">Логи появятся после загрузки данных диагностики</p>
+            </div>
+        </div>
+
+        <!-- Вкладка НАГРУЗКА -->
+        <div id="load" class="tab-content">
+            <div class="info-card">
+                <h3>ℹ️ Что такое HPA и метрики?</h3>
+                <p><strong>HPA (Horizontal Pod Autoscaler)</strong> автоматически увеличивает или уменьшает количество копий вашего приложения в зависимости от нагрузки (CPU, память). На этой вкладке вы видите текущее потребление ресурсов каждым подом и узлом, а также настройки автомасштабирования.</p>
+            </div>
+
+            <h3 style="margin-bottom: 15px; color: #667eea;">HPA - Автомасштабирование</h3>
+            <table id="hpa-table">
+                <thead>
+                    <tr>
+                        <th>Имя</th>
+                        <th>Мин. реплик</th>
+                        <th>Макс. реплик</th>
+                        <th>Текущие реплики</th>
+                        <th>Целевой CPU</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="5" style="text-align: center; color: #666;">Нет данных</td></tr>
+                </tbody>
+            </table>
+
+            <h3 style="margin: 30px 0 15px; color: #667eea;">Топ подов по потреблению ресурсов</h3>
+            <table id="top-pods-table">
+                <thead>
+                    <tr>
+                        <th>Под</th>
+                        <th>Контейнер</th>
+                        <th>CPU</th>
+                        <th>Память</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="4" style="text-align: center; color: #666;">Нет данных</td></tr>
+                </tbody>
+            </table>
+
+            <h3 style="margin: 30px 0 15px; color: #667eea;">Топ узлов по потреблению ресурсов</h3>
+            <table id="top-nodes-table">
+                <thead>
+                    <tr>
+                        <th>Узел</th>
+                        <th>CPU</th>
+                        <th>Память</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="3" style="text-align: center; color: #666;">Нет данных</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Вкладка ПРОБЛЕМЫ -->
+        <div id="issues" class="tab-content">
+            <div class="info-card">
+                <h3>ℹ️ Как интерпретировать проблемы?</h3>
+                <p>Система автоматически анализирует логи, события Kubernetes и статусы подов, чтобы найти проблемы. Каждая проблема имеет уровень критичности:<br>
+                🔴 <strong>Critical</strong> - требует немедленного вмешательства<br>
+                🟠 <strong>High</strong> - важно решить в ближайшее время<br>
+                🟡 <strong>Medium</strong> - стоит обратить внимание<br>
+                🟢 <strong>Low</strong> - информационное сообщение</p>
+                <p>Для каждой проблемы даны рекомендации по устранению.</p>
+            </div>
+
+            <div id="issues-container">
+                <p style="color: #666;">Проблемы появятся после загрузки данных диагностики</p>
+            </div>
+        </div>
+
+        <!-- Вкладка СОБЫТИЯ -->
+        <div id="events" class="tab-content">
+            <div class="info-card">
+                <h3>ℹ️ Что такое события Kubernetes?</h3>
+                <p>События (Events) - это записи о том, что происходит в вашем кластере: запуск подов, ошибки планирования, проблемы с образами и т.д. Warning события (предупреждения) часто указывают на проблемы, которые требуют внимания. События помогают понять хронологию возникновения проблем.</p>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="margin-right: 15px;">
+                    <input type="checkbox" id="show-warnings-only" checked> Показывать только предупреждения (Warning)
+                </label>
+            </div>
+
+            <table id="events-table">
+                <thead>
+                    <tr>
+                        <th>Время</th>
+                        <th>Тип</th>
+                        <th>Объект</th>
+                        <th>Причина</th>
+                        <th>Сообщение</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="5" style="text-align: center; color: #666;">Нет данных</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Вкладка ХРАНИЛИЩЕ -->
+        <div id="storage" class="tab-content">
+            <div class="info-card">
+                <h3>ℹ️ PVC и PV - что это?</h3>
+                <p><strong>PVC (PersistentVolumeClaim)</strong> - это запрос на выделение места для хранения данных вашим приложением.<br>
+                <strong>PV (PersistentVolume)</strong> - фактически выделенное место в кластере.<br>
+                Если PVC находится в статусе Pending, значит не удалось выделить место. Status Bound означает успешное подключение хранилища.</p>
+            </div>
+
+            <h3 style="margin-bottom: 15px; color: #667eea;">Persistent Volume Claims</h3>
+            <table id="pvc-table">
+                <thead>
+                    <tr>
+                        <th>Имя</th>
+                        <th>Статус</th>
+                        <th>Volume</th>
+                        <th>Ёмкость</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="4" style="text-align: center; color: #666;">Нет данных</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Вкладка ЗАГРУЗКА -->
+        <div id="upload" class="tab-content">
+            <div class="info-card">
+                <h3>ℹ️ Как загрузить данные?</h3>
+                <p>1. Запустите скрипт диагностики на сервере:<br>
+                <code>./diag_collector.sh</code><br><br>
+                2. После завершения вы получите архив с данными (например, diag_data_20250101_120000.tar.gz)<br><br>
+                3. Перетащите архив в область ниже или кликните для выбора файла<br><br>
+                4. Система автоматически проанализирует данные и покажет результаты во всех вкладках</p>
+            </div>
+
+            <div class="upload-area" onclick="document.getElementById('file-input').click()">
+                <div style="font-size: 48px; margin-bottom: 15px;">📦</div>
+                <h3>Перетащите архив сюда или кликните для выбора</h3>
+                <p class="help-text">Поддерживаются файлы .tar.gz, созданные скриптом diag_collector.sh</p>
+                <input type="file" id="file-input" accept=".tar.gz,.gz" style="display: none;" onchange="handleFileUpload(event)">
+            </div>
+
+            <div id="upload-status" style="margin-top: 20px;"></div>
+        </div>
+    </div>
+
+    <script>
+        function showTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const statusDiv = document.getElementById('upload-status');
+            statusDiv.innerHTML = '<p style="color: #667eea;">⏳ Обработка файла...</p>';
+
+            const formData = new FormData();
+            formData.append('archive', file);
+
+            fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                statusDiv.innerHTML = '<p style="color: #28a745;">✅ Данные успешно загружены и обработаны!</p>';
+                loadData();
+            })
+            .catch(error => {
+                statusDiv.innerHTML = '<p style="color: #dc3545;">❌ Ошибка загрузки: ' + error.message + '</p>';
+            });
+        }
+
+        function loadData() {
+            fetch('/api/report')
+                .then(r => r.json())
+                .then(data => updateOverview(data));
+
+            fetch('/api/issues')
+                .then(r => r.json())
+                .then(data => displayIssues(data));
+
+            fetch('/api/resources')
+                .then(r => r.json())
+                .then(data => displayResources(data));
+
+            fetch('/api/logs')
+                .then(r => r.json())
+                .then(data => displayLogs(data));
+        }
+
+        function updateOverview(report) {
+            if (report.cluster_info) {
+                document.getElementById('pods-count').textContent = report.cluster_info.pods_count || 0;
+                document.getElementById('nodes-count').textContent = report.cluster_info.nodes_count || 0;
+                document.getElementById('hpa-count').textContent = report.cluster_info.hpa_count || 0;
+            }
+        }
+
+        function displayIssues(issues) {
+            const container = document.getElementById('issues-container');
+            const recentContainer = document.getElementById('recent-issues');
+
+            if (!issues || issues.length === 0) {
+                container.innerHTML = '<p style="color: #28a745;">✅ Проблем не обнаружено! Система работает нормально.</p>';
+                recentContainer.innerHTML = '<p style="color: #28a745;">✅ Проблем нет</p>';
+                document.getElementById('issues-count').textContent = '0';
+                return;
+            }
+
+            document.getElementById('issues-count').textContent = issues.length;
+
+            let html = '';
+            issues.forEach(issue => {
+                const severityClass = 'issue-' + issue.severity.toLowerCase();
+                const badgeClass = 'severity-' + issue.severity.toLowerCase();
+
+                html += `
+                    <div class="issue-card ${severityClass}">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
+                            <span class="severity-badge ${badgeClass}">${issue.severity}</span>
+                            <small style="color: #666;">${issue.type}</small>
+                        </div>
+                        <h4 style="margin-bottom: 10px; color: #333;">${issue.message}</h4>
+                        ${issue.pod ? `<p><strong>Pod:</strong> ${issue.pod}</p>` : ''}
+                        ${issue.container ? `<p><strong>Container:</strong> ${issue.container}</p>` : ''}
+                        ${issue.correlation ? `<p style="margin-top: 10px; color: #667eea;"><strong>🔗 Корреляция:</strong> ${issue.correlation}</p>` : ''}
+                        <div class="code-block" style="margin-top: 10px;">
+                            <strong>💡 Рекомендация:</strong><br>
+                            ${issue.recommendation}
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+
+            // Последние 3 проблемы для обзора
+            const recent = issues.slice(0, 3);
+            let recentHtml = '';
+            recent.forEach(issue => {
+                recentHtml += `<div class="issue-card issue-${issue.severity}" style="padding: 15px;">
+                    <strong>${issue.message}</strong>
+                    <div style="margin-top: 5px; font-size: 12px; color: #666;">${issue.recommendation}</div>
+                </div>`;
+            });
+            recentContainer.innerHTML = recentHtml;
+        }
+
+        function displayResources(resources) {
+            // HPA таблица
+            const hpaTable = document.getElementById('hpa-table').querySelector('tbody');
+            if (resources.hpa && resources.hpa.length > 0) {
+                hpaTable.innerHTML = resources.hpa.map(hpa => `
+                    <tr>
+                        <td>${hpa.name}</td>
+                        <td>${hpa.min_replicas}</td>
+                        <td>${hpa.max_replicas}</td>
+                        <td>${hpa.current_replicas}</td>
+                        <td>${hpa.target_cpu}</td>
+                    </tr>
+                `).join('');
+            }
+
+            // Top Pods таблица
+            const podsTable = document.getElementById('top-pods-table').querySelector('tbody');
+            if (resources.top_pods && resources.top_pods.length > 0) {
+                podsTable.innerHTML = resources.top_pods.map(pod => `
+                    <tr>
+                        <td>${pod.name}</td>
+                        <td>${pod.container}</td>
+                        <td>${pod.cpu}</td>
+                        <td>${pod.memory}</td>
+                    </tr>
+                `).join('');
+            }
+
+            // Top Nodes таблица
+            const nodesTable = document.getElementById('top-nodes-table').querySelector('tbody');
+            if (resources.top_nodes && resources.top_nodes.length > 0) {
+                nodesTable.innerHTML = resources.top_nodes.map(node => `
+                    <tr>
+                        <td>${node.name}</td>
+                        <td>${node.cpu}</td>
+                        <td>${node.memory}</td>
+                    </tr>
+                `).join('');
+            }
+
+            // PVC таблица
+            const pvcTable = document.getElementById('pvc-table').querySelector('tbody');
+            if (resources.pvc_status && resources.pvc_status.length > 0) {
+                pvcTable.innerHTML = resources.pvc_status.map(pvc => `
+                    <tr>
+                        <td>${pvc.name}</td>
+                        <td><span style="color: ${pvc.status === 'Bound' ? '#28a745' : '#dc3545'}">${pvc.status}</span></td>
+                        <td>${pvc.volume}</td>
+                        <td>-</td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        function displayLogs(logs) {
+            const container = document.getElementById('logs-container');
+            if (!logs || Object.keys(logs).length === 0) {
+                container.innerHTML = '<p style="color: #666;">Логи отсутствуют</p>';
+                return;
+            }
+
+            let html = '';
+            for (const [pod, containers] of Object.entries(logs)) {
+                containers.forEach(cont => {
+                    const errorClass = cont.errors > 0 ? 'issue-high' : '';
+                    html += `
+                        <div class="issue-card ${errorClass}">
+                            <h4 style="margin-bottom: 10px;">
+                                📦 ${pod} / 📦 ${cont.container}
+                                ${cont.errors > 0 ? `<span style="color: #dc3545;"> (${cont.errors} ошибок)</span>` : ''}
+                                ${cont.warnings > 0 ? `<span style="color: #ffc107;"> (${cont.warnings} предупреждений)</span>` : ''}
+                            </h4>
+                            <div class="code-block" style="max-height: 300px; overflow-y: auto;">
+                                ${cont.content.substring(0, 2000)}${cont.content.length > 2000 ? '...' : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            container.innerHTML = html;
+        }
+
+        // Автозагрузка при старте (если данные уже есть)
+        window.addEventListener('DOMContentLoaded', () => {
+            loadData();
+        });
+    </script>
+</body>
+</html>
