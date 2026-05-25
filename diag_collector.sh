@@ -62,7 +62,7 @@ for log_file in "$OUTPUT_DIR"/logs/*/*.log; do
     if [ -f "$log_file" ]; then
         pod_name=$(basename "$(dirname "$log_file")")
         container_name=$(basename "$log_file" .log)
-
+        
         for pattern in "${ERROR_PATTERNS[@]}"; do
             if grep -q "$pattern" "$log_file" 2>/dev/null; then
                 count=$(grep -c "$pattern" "$log_file" 2>/dev/null || echo 0)
