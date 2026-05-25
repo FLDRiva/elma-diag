@@ -59,8 +59,6 @@ kind: Ingress
 metadata:
   name: elma-diag
   namespace: elma-diag
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
   rules:
   - host: diag.riva.elewise.local
