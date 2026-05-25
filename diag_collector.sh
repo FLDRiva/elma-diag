@@ -10,8 +10,30 @@ WORK_DIR="ELMA365-${TIMESTAMP}"
 TEXT_ARCHIVE="${WORK_DIR}.tar.gz"
 JSON_ARCHIVE="elma-diag-${TIMESTAMP}.json.gz"
 LOG_TAIL=2000
-MAX_LOG_ENTRIES_PER_CTR=200
+MAX_ERROR=200
+MAX_INFO=50
+MAX_DEBUG=20
 NAMESPACE=""
+
+# Парсит log_file и добавляет записи с нужным уровнем в entries_file
+parse_log_level() {
+  local log_file="$1" pod="$2" pattern="$3" limit="$4"
+  grep -E "\"level\"\s*:\s*\"(${pattern})\"" "${log_file}" 2>/dev/null | \
+    head -n "${limit}" | \
+    while IFS= read -r line; do
+      local json_part
+      json_part=$(echo "${line}" | sed 's/^[^{]*//')
+      echo "${json_part}" | jq -c --arg pod "${pod}" \
+        'select(.level != null and .msg != null) | {
+          pod: $pod,
+          level: .level,
+          time: (.timestamp // ""),
+          service: (.logger // "" | ltrimstr("elma365.") | split(".") | .[0]),
+          msg: .msg,
+          error: (.error // "")
+        }' 2>/dev/null
+    done >> "${entries_file}" || true
+}
 
 check_deps() {
   for cmd in kubectl jq gzip awk sed; do
@@ -96,23 +118,9 @@ main() {
       kubectl logs "${pod}" -c "${ctr}" -n "${NAMESPACE}" \
         --tail="${LOG_TAIL}" > "${log_file}" 2>/dev/null || echo "(нет логов)" > "${log_file}"
 
-      # Парсим структурированные JSON логи ELMA365 (error/warn/fatal)
-      # grep || true — чтобы set -e не прерывал скрипт при отсутствии совпадений
-      grep -E '"level"\s*:\s*"(error|warn|fatal)"' "${log_file}" 2>/dev/null | \
-        head -n "${MAX_LOG_ENTRIES_PER_CTR}" | \
-        while IFS= read -r line; do
-          local json_part
-          json_part=$(echo "${line}" | sed 's/^[^{]*//')
-          echo "${json_part}" | jq -c --arg pod "${pod}" \
-            'select(.level != null and .msg != null) | {
-              pod: $pod,
-              level: .level,
-              time: (.timestamp // ""),
-              service: (.logger // "" | ltrimstr("elma365.") | split(".") | .[0]),
-              msg: .msg,
-              error: (.error // "")
-            }' 2>/dev/null
-        done >> "${entries_file}" || true
+      parse_log_level "${log_file}" "${pod}" "error|warn|fatal" "${MAX_ERROR}"
+      parse_log_level "${log_file}" "${pod}" "info"            "${MAX_INFO}"
+      parse_log_level "${log_file}" "${pod}" "debug"           "${MAX_DEBUG}"
     done <<< "${ctrs}"
   done <<< "${pod_names}"
 
@@ -175,7 +183,7 @@ main() {
 
   local log_entries="[]"
   if [ -s "${entries_file}" ]; then
-    log_entries=$(jq -s '.[0:500]' "${entries_file}" 2>/dev/null || echo "[]")
+    log_entries=$(jq -s '.[0:2000]' "${entries_file}" 2>/dev/null || echo "[]")
   fi
 
   # JSON архив

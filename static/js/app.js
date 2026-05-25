@@ -1,8 +1,8 @@
 'use strict';
 
 let currentReport = null;
-let currentTab = 'overview';
-let logFilter = 'all';
+let currentTab = 'load';
+let logFilter = 'error';
 
 document.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } catch (_) {}
 
-  showTab('overview');
+  showTab(currentReport ? 'load' : 'upload');
 });
 
 function showTab(tab) {
@@ -32,12 +32,11 @@ function showTab(tab) {
 function renderTab(tab) {
   const el = document.getElementById('content');
   switch (tab) {
-    case 'overview': el.innerHTML = renderOverview(); break;
-    case 'load':     el.innerHTML = renderLoad();     break;
-    case 'logs':     el.innerHTML = renderLogs();     break;
-    case 'issues':   el.innerHTML = renderIssues();   break;
-    case 'events':   el.innerHTML = renderEvents();   break;
-    case 'upload':   el.innerHTML = renderUpload(); bindUpload(); break;
+    case 'load':   el.innerHTML = renderLoad();   break;
+    case 'logs':   el.innerHTML = renderLogs();   break;
+    case 'issues': el.innerHTML = renderIssues(); break;
+    case 'events': el.innerHTML = renderEvents(); break;
+    case 'upload': el.innerHTML = renderUpload(); bindUpload(); break;
   }
 }
 
@@ -46,44 +45,9 @@ function updateNsBadge(ns) {
   if (el) el.textContent = ns;
 }
 
-// --- Обзор ---
-function renderOverview() {
-  if (!currentReport) {
-    return `<div class="no-data">Нет данных. Загрузите отчёт на вкладке "Загрузка".</div>`;
-  }
-  const r = currentReport;
-  const pods   = r.cluster.pods   || [];
-  const nodes  = r.cluster.nodes  || [];
-  const issues = r.issues         || [];
-  const hpas   = r.cluster.hpas   || [];
-
-  const critical = issues.filter(i => i.severity === 'critical').length;
-  const high     = issues.filter(i => i.severity === 'high').length;
-
-  const alertHtml = (critical > 0 || high > 0) ? `
-    <div class="alert-banner">${critical} критических, ${high} важных проблем требуют внимания</div>` : '';
-
-  const statsHtml = `<div class="stats-grid">
-    <div class="stat-card"><div class="stat-num">${pods.length}</div><div class="stat-label">Подов</div></div>
-    <div class="stat-card"><div class="stat-num">${nodes.length}</div><div class="stat-label">Узлов</div></div>
-    <div class="stat-card"><div class="stat-num">${issues.length}</div><div class="stat-label">Проблем</div></div>
-    <div class="stat-card"><div class="stat-num">${hpas.length}</div><div class="stat-label">HPA</div></div>
-  </div>`;
-
-  const topIssues = issues.slice(0, 5);
-  const issuesHtml = topIssues.length === 0
-    ? `<p class="muted">Проблем не обнаружено</p>`
-    : topIssues.map(issueCard).join('');
-
-  const meta = r.meta.collected_at
-    ? `<p class="muted" style="margin-top:16px;font-size:12px">Собрано: ${esc(r.meta.collected_at)}</p>` : '';
-
-  return `${statsHtml}${alertHtml}<div class="section-title">Топ проблем</div>${issuesHtml}${meta}`;
-}
-
 // --- Нагрузка ---
 function renderLoad() {
-  if (!currentReport) return `<div class="no-data">Нет данных</div>`;
+  if (!currentReport) return noData();
   const r = currentReport;
   const hpas = r.cluster.hpas || [];
   const pods  = r.cluster.pods || [];
@@ -112,7 +76,7 @@ function renderLoad() {
       </tr>`).join('');
 
   const podBody = rows.length === 0
-    ? `<tr><td colspan="6" class="no-data">Нет данных о подах</td></tr>`
+    ? `<tr><td colspan="6" class="no-data">Нет данных</td></tr>`
     : rows.map(row => `<tr class="${row.noLimits ? 'row-warn' : ''}">
         <td>${esc(row.pod)}</td>
         <td>${esc(row.ctr)}</td>
@@ -138,44 +102,54 @@ function renderLoad() {
 }
 
 // --- Логи ---
+const LOG_FILTERS = [
+  { key: 'error', label: 'Ошибки',         match: e => e.level === 'error' || e.level === 'fatal' },
+  { key: 'warn',  label: 'Предупреждения', match: e => e.level === 'warn' },
+  { key: 'info',  label: 'Инфо',           match: e => e.level === 'info' },
+  { key: 'debug', label: 'Дебаг',          match: e => e.level === 'debug' },
+];
+
 function renderLogs() {
-  if (!currentReport) return `<div class="no-data">Нет данных</div>`;
+  if (!currentReport) return noData();
   const entries = currentReport.logs.entries || [];
 
-  const filtered = logFilter === 'all'
-    ? entries
-    : entries.filter(e => logFilter === 'error'
-        ? (e.level === 'error' || e.level === 'fatal')
-        : e.level === logFilter);
+  const filterDef = LOG_FILTERS.find(f => f.key === logFilter) || LOG_FILTERS[0];
+  const filtered = entries.filter(filterDef.match);
 
-  const count = (lvl) => lvl === 'all' ? entries.length
-    : lvl === 'error' ? entries.filter(e => e.level === 'error' || e.level === 'fatal').length
-    : entries.filter(e => e.level === lvl).length;
-
-  const filterBtns = [
-    ['all',  'Все'],
-    ['error','Ошибки'],
-    ['warn', 'Предупреждения'],
-  ].map(([f, label]) =>
-    `<button class="filter-btn ${logFilter === f ? 'active' : ''}" onclick="setLogFilter('${f}')">${label} (${count(f)})</button>`
-  ).join('');
+  const btns = LOG_FILTERS.map(f => {
+    const cnt = entries.filter(f.match).length;
+    return `<button class="filter-btn ${logFilter === f.key ? 'active' : ''}" onclick="setLogFilter('${f.key}')">${f.label} (${cnt})</button>`;
+  }).join('');
 
   const rows = filtered.length === 0
-    ? `<tr><td colspan="5" class="no-data">Нет записей</td></tr>`
-    : filtered.map(e => `<tr>
-        <td><span class="badge badge-${esc(e.level)}">${esc(e.level)}</span></td>
-        <td>${esc(e.pod)}</td>
-        <td>${esc(e.service)}</td>
-        <td class="cell-trunc">${esc(e.msg)}</td>
-        <td class="cell-trunc" style="color:var(--red);font-size:11px">${esc(e.error)}</td>
-      </tr>`).join('');
+    ? `<tr><td colspan="4" class="no-data">Нет записей</td></tr>`
+    : filtered.map((e, i) => {
+        const hasDetail = e.msg || e.error;
+        return `
+          <tr class="log-row ${hasDetail ? 'expandable' : ''}" onclick="toggleDetail('log-${i}')">
+            <td><span class="badge badge-${esc(e.level)}">${esc(e.level)}</span></td>
+            <td>${esc(e.pod)}</td>
+            <td>${esc(e.service)}</td>
+            <td class="cell-trunc">${esc(e.msg)}</td>
+          </tr>
+          ${hasDetail ? `<tr id="log-${i}" class="detail-row">
+            <td colspan="4">
+              <div class="detail-content">
+                ${e.msg   ? `<div><span class="detail-label">Сообщение</span><pre class="detail-pre">${esc(e.msg)}</pre></div>` : ''}
+                ${e.error ? `<div><span class="detail-label">Ошибка</span><pre class="detail-pre detail-err">${esc(e.error)}</pre></div>` : ''}
+                ${e.time  ? `<div class="detail-meta">Время: ${esc(e.time)}</div>` : ''}
+              </div>
+            </td>
+          </tr>` : ''}`;
+      }).join('');
 
   return `
-    <div class="log-filters">${filterBtns}</div>
+    <div class="log-filters">${btns}</div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Уровень</th><th>Pod</th><th>Сервис</th><th>Сообщение</th><th>Ошибка</th></tr></thead>
+      <thead><tr><th>Уровень</th><th>Pod</th><th>Сервис</th><th>Сообщение</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table></div>`;
+    </table></div>
+    <p class="muted" style="font-size:12px;margin-top:8px">Кликните по строке для просмотра полного текста</p>`;
 }
 
 function setLogFilter(f) {
@@ -185,7 +159,7 @@ function setLogFilter(f) {
 
 // --- Проблемы ---
 function renderIssues() {
-  if (!currentReport) return `<div class="no-data">Нет данных</div>`;
+  if (!currentReport) return noData();
   const issues = currentReport.issues || [];
   return issues.length === 0
     ? `<div class="no-data">Проблем не обнаружено</div>`
@@ -210,23 +184,33 @@ function issueCard(issue) {
 
 // --- События ---
 function renderEvents() {
-  if (!currentReport) return `<div class="no-data">Нет данных</div>`;
+  if (!currentReport) return noData();
   const events = currentReport.cluster.events || [];
   if (events.length === 0) return `<div class="no-data">Событий нет</div>`;
 
-  const rows = events.map(e => `<tr>
-    <td style="white-space:nowrap;font-size:12px">${esc(e.last_seen)}</td>
-    <td>${esc(e.reason)}</td>
-    <td>${esc(e.object)}</td>
-    <td>${esc(e.kind)}</td>
-    <td>${e.count > 1 ? e.count : ''}</td>
-    <td class="cell-trunc">${esc(e.message)}</td>
-  </tr>`).join('');
+  const rows = events.map((e, i) => `
+    <tr class="log-row expandable" onclick="toggleDetail('ev-${i}')">
+      <td style="white-space:nowrap;font-size:12px">${esc(e.last_seen)}</td>
+      <td>${esc(e.reason)}</td>
+      <td>${esc(e.object)}</td>
+      <td>${esc(e.kind)}</td>
+      <td>${e.count > 1 ? e.count : ''}</td>
+      <td class="cell-trunc">${esc(e.message)}</td>
+    </tr>
+    <tr id="ev-${i}" class="detail-row">
+      <td colspan="6">
+        <div class="detail-content">
+          <pre class="detail-pre">${esc(e.message)}</pre>
+        </div>
+      </td>
+    </tr>`).join('');
 
-  return `<div class="table-wrap"><table>
-    <thead><tr><th>Время</th><th>Причина</th><th>Объект</th><th>Тип</th><th>Кол-во</th><th>Сообщение</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div>`;
+  return `
+    <div class="table-wrap"><table>
+      <thead><tr><th>Время</th><th>Причина</th><th>Объект</th><th>Тип</th><th>Кол-во</th><th>Сообщение</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <p class="muted" style="font-size:12px;margin-top:8px">Кликните по строке для просмотра полного сообщения</p>`;
 }
 
 // --- Загрузка ---
@@ -272,19 +256,24 @@ async function doUpload(file) {
     updateNsBadge(currentReport.meta.namespace);
 
     if (statusEl) {
-      const podCount   = (currentReport.cluster.pods   || []).length;
-      const issueCount = (currentReport.issues          || []).length;
       statusEl.innerHTML = `<div class="upload-status ok">
         Файл загружен. Namespace: ${esc(currentReport.meta.namespace)},
-        подов: ${podCount}, проблем: ${issueCount}.
+        подов: ${(currentReport.cluster.pods || []).length},
+        проблем: ${(currentReport.issues || []).length}.
       </div>`;
     }
-    setTimeout(() => showTab('overview'), 1000);
+    setTimeout(() => showTab('load'), 1000);
   } catch (e) {
     if (statusEl) {
       statusEl.innerHTML = `<div class="upload-status err">Ошибка: ${esc(e.message)}</div>`;
     }
   }
+}
+
+// --- Раскрытие строк ---
+function toggleDetail(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
 }
 
 // --- Вспомогательные ---
@@ -301,4 +290,8 @@ function esc(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function noData() {
+  return `<div class="no-data">Нет данных. Загрузите отчёт на вкладке "Загрузка".</div>`;
 }
