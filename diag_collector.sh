@@ -82,16 +82,22 @@ main() {
   fi
 
   # --- Логи подов ---
-  echo "Сбор логов..."
   local pod_names
   pod_names=$(echo "${pods_raw}" | jq -r '.items[].metadata.name')
+  local pod_total pod_idx
+  pod_total=$(echo "${pod_names}" | wc -l | tr -d ' ')
+  pod_idx=0
+
+  echo "Сбор логов (подов: ${pod_total})..."
 
   while IFS= read -r pod; do
+    pod_idx=$((pod_idx + 1))
     local ctrs
     ctrs=$(echo "${pods_raw}" | jq -r --arg p "${pod}" \
       '.items[] | select(.metadata.name == $p) | .spec.containers[].name')
 
     while IFS= read -r ctr; do
+      echo "  [${pod_idx}/${pod_total}] ${pod} / ${ctr}"
       local log_file="${WORK_DIR}/pod_logs/${pod}-${ctr}.log"
       kubectl logs "${pod}" -c "${ctr}" -n "${NAMESPACE}" \
         --tail="${LOG_TAIL}" > "${log_file}" 2>/dev/null || echo "(нет логов)" > "${log_file}"
