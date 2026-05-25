@@ -125,10 +125,16 @@ main() {
   done <<< "${pod_names}"
 
   # --- Формирование JSON ---
+  # Используем файлы вместо --argjson чтобы обойти лимит длины аргументов
   echo "Формирование JSON отчёта..."
+  local tmp="${WORK_DIR}/.tmp"
+  mkdir -p "${tmp}"
 
-  local pods_data
-  pods_data=$(echo "${pods_raw}" | jq --argjson top "${top_json}" '[.items[] |
+  # top_json в файл для передачи в jq через --slurpfile
+  echo "${top_json}" > "${tmp}/top.json"
+
+  # pods
+  echo "${pods_raw}" | jq --slurpfile top "${tmp}/top.json" '[.items[] |
     . as $pod | {
       name: .metadata.name,
       phase: (.status.phase // "Unknown"),
@@ -145,60 +151,62 @@ main() {
           cpu_lim: ($spec.resources.limits.cpu // ""),
           mem_req: ($spec.resources.requests.memory // ""),
           mem_lim: ($spec.resources.limits.memory // ""),
-          cpu_now: ($top[$pod.metadata.name + "/" + $spec.name].cpu // ""),
-          mem_now: ($top[$pod.metadata.name + "/" + $spec.name].mem // "")
+          cpu_now: ($top[0][$pod.metadata.name + "/" + $spec.name].cpu // ""),
+          mem_now: ($top[0][$pod.metadata.name + "/" + $spec.name].mem // "")
         }
       ]
     }
-  ]')
+  ]' > "${tmp}/pods.json" || echo "[]" > "${tmp}/pods.json"
 
-  local hpas_data
-  hpas_data=$(kubectl get hpa -n "${NAMESPACE}" -o json 2>/dev/null | jq '[.items[] | {
+  # hpas
+  kubectl get hpa -n "${NAMESPACE}" -o json 2>/dev/null | jq '[.items[] | {
     name: .metadata.name,
     target: (.spec.scaleTargetRef.name // ""),
     min: (.spec.minReplicas // 1),
     max: .spec.maxReplicas,
     current: (.status.currentReplicas // 0),
     desired: (.status.desiredReplicas // 0)
-  }]' || echo "[]")
+  }]' > "${tmp}/hpas.json" || echo "[]" > "${tmp}/hpas.json"
 
-  local events_data
-  events_data=$(kubectl get events -n "${NAMESPACE}" -o json 2>/dev/null | jq '[.items[] | {
+  # events
+  kubectl get events -n "${NAMESPACE}" -o json 2>/dev/null | jq '[.items[] | {
     reason: (.reason // ""),
     message: (.message // ""),
     object: (.involvedObject.name // ""),
     kind: (.involvedObject.kind // ""),
     count: (.count // 1),
     last_seen: (.lastTimestamp // "")
-  }]' || echo "[]")
+  }]' > "${tmp}/events.json" || echo "[]" > "${tmp}/events.json"
 
-  local nodes_data
-  nodes_data=$(kubectl get nodes -o json 2>/dev/null | jq '[.items[] | {
+  # nodes
+  kubectl get nodes -o json 2>/dev/null | jq '[.items[] | {
     name: .metadata.name,
     ready: ((.status.conditions // []) | map(select(.type == "Ready")) | if length > 0 then .[0].status == "True" else false end),
     cpu: (.status.capacity.cpu // ""),
     memory: (.status.capacity.memory // ""),
     version: (.status.nodeInfo.kubeletVersion // "")
-  }]' || echo "[]")
+  }]' > "${tmp}/nodes.json" || echo "[]" > "${tmp}/nodes.json"
 
-  local log_entries="[]"
+  # log entries
   if [ -s "${entries_file}" ]; then
-    log_entries=$(jq -s '.[0:2000]' "${entries_file}" 2>/dev/null || echo "[]")
+    jq -s '.[0:2000]' "${entries_file}" > "${tmp}/entries.json" || echo "[]" > "${tmp}/entries.json"
+  else
+    echo "[]" > "${tmp}/entries.json"
   fi
 
-  # JSON архив
+  # Сборка итогового JSON через --slurpfile (без передачи данных как аргументов)
   jq -n \
     --arg ns "${NAMESPACE}" \
     --arg ts "$(date -Iseconds)" \
-    --argjson pods "${pods_data}" \
-    --argjson hpas "${hpas_data}" \
-    --argjson events "${events_data}" \
-    --argjson nodes "${nodes_data}" \
-    --argjson entries "${log_entries}" \
+    --slurpfile pods    "${tmp}/pods.json" \
+    --slurpfile hpas    "${tmp}/hpas.json" \
+    --slurpfile events  "${tmp}/events.json" \
+    --slurpfile nodes   "${tmp}/nodes.json" \
+    --slurpfile entries "${tmp}/entries.json" \
     '{
       meta: {namespace: $ns, collected_at: $ts, version: "1.0"},
-      cluster: {pods: $pods, hpas: $hpas, events: $events, nodes: $nodes},
-      logs: {entries: $entries}
+      cluster: {pods: $pods[0], hpas: $hpas[0], events: $events[0], nodes: $nodes[0]},
+      logs: {entries: $entries[0]}
     }' | gzip > "${JSON_ARCHIVE}"
 
   # Текстовый архив
