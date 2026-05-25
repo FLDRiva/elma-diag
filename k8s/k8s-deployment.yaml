@@ -63,7 +63,7 @@ metadata:
     nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
   rules:
-  - host: elma-diag.local
+  - host: diag.riva.elewise.local
     http:
       paths:
       - path: /
