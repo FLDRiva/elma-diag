@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: diagnostics-elma365-diagnostics
-  namespace: elma365-diagnostics
+  name: elma-diag
+  namespace: elma-diag
   labels:
-    app: elma365-diagnostics
+    app: elma-diag
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: elma365-diagnostics
+      app: elma-diag
   template:
     metadata:
       labels:
-        app: elma365-diagnostics
+        app: elma-diag
     spec:
       containers:
-      - name: diagnostics
-        image: rivasr/elma365-diagnostics:1.5.4
+      - name: elma-diag
+        image: rivasr/elma-diag:latest
         ports:
         - containerPort: 8080
         resources:
@@ -43,11 +43,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: diagnostics-elma365-service
-  namespace: elma365-diagnostics
+  name: elma-diag
+  namespace: elma-diag
 spec:
   selector:
-    app: elma365-diagnostics
+    app: elma-diag
   ports:
   - protocol: TCP
     port: 80
@@ -57,24 +57,19 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: diagnostics-elma365-ingress
-  namespace: elma365-diagnostics
+  name: elma-diag
+  namespace: elma-diag
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
-  tls:
-  - hosts:
-    - diag.riva.elewise.local
-    secretName: diagnostics-tls
   rules:
-  - host: diag.riva.elewise.local
+  - host: elma-diag.local
     http:
       paths:
       - path: /
         pathType: Prefix
         backend:
           service:
-            name: diagnostics-elma365-service
+            name: elma-diag
             port:
               number: 80

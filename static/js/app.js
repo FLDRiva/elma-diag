@@ -1,324 +1,304 @@
-// Глобальное состояние
-let currentData = null;
+'use strict';
 
-// Переключение вкладок
-function showTab(tabId) {
-    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    
-    document.getElementById(tabId).classList.add('active');
-    document.querySelector(`button[onclick="showTab('${tabId}')"]`).classList.add('active');
-    
-    // Загрузка данных при переключении
-    if (currentData) {
-        loadTabData(tabId);
+let currentReport = null;
+let currentTab = 'overview';
+let logFilter = 'all';
+
+document.addEventListener('DOMContentLoaded', async () => {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => showTab(btn.dataset.tab));
+  });
+
+  try {
+    const res = await fetch('/api/report');
+    const data = await res.json();
+    if (data && data.meta && data.meta.namespace) {
+      currentReport = data;
+      updateNsBadge(data.meta.namespace);
     }
-}
+  } catch (_) {}
 
-// Загрузка данных вкладки
-function loadTabData(tabId) {
-    switch(tabId) {
-        case 'overview':
-            loadOverview();
-            break;
-        case 'logs':
-            loadLogs();
-            break;
-        case 'load':
-            loadResources();
-            break;
-        case 'issues':
-            loadIssues();
-            break;
-        case 'events':
-            loadEvents();
-            break;
-        case 'storage':
-            loadStorage();
-            break;
-    }
-}
-
-// Загрузка обзора
-async function loadOverview() {
-    if (!currentData) return;
-    
-    document.getElementById('pods-count').textContent = currentData.cluster_info?.pods_count || 0;
-    document.getElementById('nodes-count').textContent = currentData.cluster_info?.nodes_count || 0;
-    document.getElementById('issues-count').textContent = currentData.issues?.length || 0;
-    document.getElementById('hpa-count').textContent = currentData.resources?.hpa?.length || 0;
-    
-    // Последние проблемы
-    const issuesContainer = document.getElementById('recent-issues');
-    if (currentData.issues && currentData.issues.length > 0) {
-        issuesContainer.innerHTML = currentData.issues.slice(0, 5).map(issue => createIssueCard(issue)).join('');
-    } else {
-        issuesContainer.innerHTML = '<p style="color: #28a745; font-weight: 600;">✅ Проблем не обнаружено!</p>';
-    }
-}
-
-// Загрузка логов
-async function loadLogs() {
-    try {
-        const response = await fetch('/api/logs');
-        const logs = await response.json();
-        
-        const container = document.getElementById('logs-container');
-        if (!logs || logs.length === 0) {
-            container.innerHTML = '<p style="color: #666;">Логи отсутствуют</p>';
-            return;
-        }
-        
-        container.innerHTML = logs.map(log => `
-            <div class="issue-card" style="margin-bottom: 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <strong style="color: #667eea;">${log.pod}/${log.container}</strong>
-                    <div>
-                        <span class="severity-badge ${log.errors > 0 ? 'severity-critical' : 'severity-low'}">
-                            Ошибок: ${log.errors}
-                        </span>
-                        <span class="severity-badge ${log.warnings > 0 ? 'severity-medium' : 'severity-low'}" style="margin-left: 5px;">
-                            Предупреждений: ${log.warnings}
-                        </span>
-                    </div>
-                </div>
-                <div class="code-block" style="max-height: 300px; overflow-y: auto;">
-                    ${escapeHtml(log.content.substring(0, 2000))}${log.content.length > 2000 ? '...' : ''}
-                </div>
-            </div>
-        `).join('');
-    } catch (e) {
-        console.error('Ошибка загрузки логов:', e);
-    }
-}
-
-// Загрузка ресурсов (HPA, top pods)
-async function loadResources() {
-    try {
-        const response = await fetch('/api/resources');
-        const resources = await response.json();
-        
-        // HPA таблица
-        const hpaTable = document.querySelector('#hpa-table tbody');
-        if (resources.hpa && resources.hpa.length > 0) {
-            hpaTable.innerHTML = resources.hpa.map(hpa => `
-                <tr>
-                    <td>${hpa.name}</td>
-                    <td>${hpa.min_replicas}</td>
-                    <td>${hpa.max_replicas}</td>
-                    <td>${hpa.current_replicas}</td>
-                    <td>${hpa.target_cpu || 'N/A'}</td>
-                </tr>
-            `).join('');
-        } else {
-            hpaTable.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #666;">Нет данных</td></tr>';
-        }
-        
-        // Top pods
-        const podsTable = document.querySelector('#top-pods-table tbody');
-        if (resources.top_pods && resources.top_pods.length > 0) {
-            podsTable.innerHTML = resources.top_pods.map(pod => `
-                <tr>
-                    <td>${pod.name}</td>
-                    <td>${pod.container}</td>
-                    <td>${pod.cpu}</td>
-                    <td>${pod.memory}</td>
-                </tr>
-            `).join('');
-        } else {
-            podsTable.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #666;">Нет данных</td></tr>';
-        }
-        
-        // Top nodes
-        const nodesTable = document.querySelector('#top-nodes-table tbody');
-        if (resources.top_nodes && resources.top_nodes.length > 0) {
-            nodesTable.innerHTML = resources.top_nodes.map(node => `
-                <tr>
-                    <td>${node.name}</td>
-                    <td>${node.cpu}</td>
-                    <td>${node.memory}</td>
-                </tr>
-            `).join('');
-        } else {
-            nodesTable.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #666;">Нет данных</td></tr>';
-        }
-    } catch (e) {
-        console.error('Ошибка загрузки ресурсов:', e);
-    }
-}
-
-// Загрузка проблем
-async function loadIssues() {
-    try {
-        const response = await fetch('/api/issues');
-        const issues = await response.json();
-        
-        const container = document.getElementById('issues-container');
-        if (!issues || issues.length === 0) {
-            container.innerHTML = '<p style="color: #28a745; font-weight: 600;">✅ Проблем не обнаружено!</p>';
-            return;
-        }
-        
-        container.innerHTML = issues.map(issue => createIssueCard(issue)).join('');
-    } catch (e) {
-        console.error('Ошибка загрузки проблем:', e);
-    }
-}
-
-// Создание карточки проблемы
-function createIssueCard(issue) {
-    const severityClass = `issue-${issue.severity.toLowerCase()}`;
-    const badgeClass = `severity-${issue.severity.toLowerCase()}`;
-    
-    return `
-        <div class="issue-card ${severityClass}">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <span class="severity-badge ${badgeClass}">${issue.severity}</span>
-                <span style="color: #666; font-size: 12px;">${issue.type}</span>
-            </div>
-            <h4 style="margin-bottom: 10px; color: #333;">${issue.message}</h4>
-            ${issue.pod ? `<p><strong>Pod:</strong> ${issue.pod}</p>` : ''}
-            ${issue.container ? `<p><strong>Container:</strong> ${issue.container}</p>` : ''}
-            ${issue.pattern ? `<p><strong>Паттерн:</strong> ${issue.pattern} (${issue.count} раз)</p>` : ''}
-            ${issue.status ? `<p><strong>Статус:</strong> ${issue.status}</p>` : ''}
-            ${issue.recommendation ? `
-                <div style="background: #e8f4fd; padding: 10px; border-radius: 5px; margin-top: 10px;">
-                    <strong style="color: #0066cc;">💡 Рекомендация:</strong>
-                    <p style="margin: 5px 0 0 0; color: #333;">${issue.recommendation}</p>
-                </div>
-            ` : ''}
-        </div>
-    `;
-}
-
-// Загрузка событий
-async function loadEvents() {
-    try {
-        const showWarningsOnly = document.getElementById('show-warnings-only').checked;
-        const type = showWarningsOnly ? 'warning' : 'all';
-        
-        const response = await fetch(`/api/events?type=${type}`);
-        const events = await response.json();
-        
-        const table = document.querySelector('#events-table tbody');
-        if (!events || events.length === 0) {
-            table.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #666;">Нет данных</td></tr>';
-            return;
-        }
-        
-        table.innerHTML = events.map(event => `
-            <tr style="${event.type === 'Warning' ? 'background: #fff3cd;' : ''}">
-                <td>${event.last_timestamp || '-'}</td>
-                <td><span class="severity-badge ${event.type === 'Warning' ? 'severity-medium' : 'severity-low'}">${event.type}</span></td>
-                <td>${event.object || '-'}</td>
-                <td>${event.reason || '-'}</td>
-                <td>${event.message || '-'}</td>
-            </tr>
-        `).join('');
-    } catch (e) {
-        console.error('Ошибка загрузки событий:', e);
-    }
-}
-
-// Загрузка хранилища
-async function loadStorage() {
-    try {
-        const response = await fetch('/api/resources');
-        const resources = await response.json();
-        
-        const table = document.querySelector('#pvc-table tbody');
-        if (resources.pvc_status && resources.pvc_status.length > 0) {
-            table.innerHTML = resources.pvc_status.map(pvc => `
-                <tr>
-                    <td>${pvc.name}</td>
-                    <td><span class="severity-badge ${pvc.status === 'Bound' ? 'severity-low' : 'severity-medium'}">${pvc.status}</span></td>
-                    <td>${pvc.volume || '-'}</td>
-                    <td>${pvc.capacity || '-'}</td>
-                </tr>
-            `).join('');
-        } else {
-            table.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #666;">Нет данных</td></tr>';
-        }
-    } catch (e) {
-        console.error('Ошибка загрузки хранилища:', e);
-    }
-}
-
-// Обработка загрузки файла
-document.getElementById('file-input')?.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const uploadArea = document.querySelector('.upload-area');
-    uploadArea.innerHTML = '<div style="font-size: 48px;">⏳</div><h3>Обработка...</h3>';
-    
-    try {
-        const response = await fetch('/api/upload', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            currentData = result.report;
-            uploadArea.innerHTML = `
-                <div style="font-size: 48px;">✅</div>
-                <h3>${result.message}</h3>
-                <p class="help-text">Данные загружены. Перейдите на другие вкладки для просмотра.</p>
-            `;
-            
-            // Автопереключение на обзор
-            showTab('overview');
-        } else {
-            throw new Error(result.message || 'Ошибка загрузки');
-        }
-    } catch (error) {
-        uploadArea.innerHTML = `
-            <div style="font-size: 48px;">❌</div>
-            <h3>Ошибка: ${error.message}</h3>
-            <p class="help-text">Попробуйте загрузить файл снова</p>
-        `;
-    }
+  showTab('overview');
 });
 
-// Фильтр логов
-document.getElementById('log-filter')?.addEventListener('input', (e) => {
-    const filter = e.target.value.toLowerCase();
-    document.querySelectorAll('#logs-container .issue-card').forEach(card => {
-        const text = card.textContent.toLowerCase();
-        card.style.display = text.includes(filter) ? 'block' : 'none';
-    });
-});
-
-// Чекбокс событий
-document.getElementById('show-warnings-only')?.addEventListener('change', () => {
-    loadEvents();
-});
-
-// Экранирование HTML
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+function showTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  renderTab(tab);
 }
 
-// Проверка здоровья сервиса
-async function checkHealth() {
-    try {
-        const response = await fetch('/api/health');
-        const health = await response.json();
-        console.log('Сервис здоров:', health);
-    } catch (e) {
-        console.error('Сервис недоступен:', e);
+function renderTab(tab) {
+  const el = document.getElementById('content');
+  switch (tab) {
+    case 'overview': el.innerHTML = renderOverview(); break;
+    case 'load':     el.innerHTML = renderLoad();     break;
+    case 'logs':     el.innerHTML = renderLogs();     break;
+    case 'issues':   el.innerHTML = renderIssues();   break;
+    case 'events':   el.innerHTML = renderEvents();   break;
+    case 'upload':   el.innerHTML = renderUpload(); bindUpload(); break;
+  }
+}
+
+function updateNsBadge(ns) {
+  const el = document.getElementById('ns-badge');
+  if (el) el.textContent = ns;
+}
+
+// --- Обзор ---
+function renderOverview() {
+  if (!currentReport) {
+    return `<div class="no-data">Нет данных. Загрузите отчёт на вкладке "Загрузка".</div>`;
+  }
+  const r = currentReport;
+  const pods   = r.cluster.pods   || [];
+  const nodes  = r.cluster.nodes  || [];
+  const issues = r.issues         || [];
+  const hpas   = r.cluster.hpas   || [];
+
+  const critical = issues.filter(i => i.severity === 'critical').length;
+  const high     = issues.filter(i => i.severity === 'high').length;
+
+  const alertHtml = (critical > 0 || high > 0) ? `
+    <div class="alert-banner">${critical} критических, ${high} важных проблем требуют внимания</div>` : '';
+
+  const statsHtml = `<div class="stats-grid">
+    <div class="stat-card"><div class="stat-num">${pods.length}</div><div class="stat-label">Подов</div></div>
+    <div class="stat-card"><div class="stat-num">${nodes.length}</div><div class="stat-label">Узлов</div></div>
+    <div class="stat-card"><div class="stat-num">${issues.length}</div><div class="stat-label">Проблем</div></div>
+    <div class="stat-card"><div class="stat-num">${hpas.length}</div><div class="stat-label">HPA</div></div>
+  </div>`;
+
+  const topIssues = issues.slice(0, 5);
+  const issuesHtml = topIssues.length === 0
+    ? `<p class="muted">Проблем не обнаружено</p>`
+    : topIssues.map(issueCard).join('');
+
+  const meta = r.meta.collected_at
+    ? `<p class="muted" style="margin-top:16px;font-size:12px">Собрано: ${esc(r.meta.collected_at)}</p>` : '';
+
+  return `${statsHtml}${alertHtml}<div class="section-title">Топ проблем</div>${issuesHtml}${meta}`;
+}
+
+// --- Нагрузка ---
+function renderLoad() {
+  if (!currentReport) return `<div class="no-data">Нет данных</div>`;
+  const r = currentReport;
+  const hpas = r.cluster.hpas || [];
+  const pods  = r.cluster.pods || [];
+
+  const rows = [];
+  for (const pod of pods) {
+    for (const c of (pod.containers || [])) {
+      rows.push({
+        pod: pod.name, ctr: c.name,
+        cpuNow: c.cpu_now, memNow: c.mem_now,
+        cpuReq: c.cpu_req, cpuLim: c.cpu_lim,
+        memReq: c.mem_req, memLim: c.mem_lim,
+        noLimits: !c.cpu_lim && !c.mem_lim,
+      });
     }
+  }
+  rows.sort((a, b) => parseCPU(b.cpuNow) - parseCPU(a.cpuNow));
+
+  const hpaBody = hpas.length === 0
+    ? `<tr><td colspan="6" class="no-data">HPA не настроены</td></tr>`
+    : hpas.map(h => `<tr>
+        <td>${esc(h.name)}</td><td>${esc(h.target)}</td>
+        <td>${h.min}</td><td>${h.max}</td><td>${h.current}</td>
+        <td>${h.desired !== h.current
+          ? `<span style="color:var(--yellow)">${h.desired}</span>` : h.desired}</td>
+      </tr>`).join('');
+
+  const podBody = rows.length === 0
+    ? `<tr><td colspan="6" class="no-data">Нет данных о подах</td></tr>`
+    : rows.map(row => `<tr class="${row.noLimits ? 'row-warn' : ''}">
+        <td>${esc(row.pod)}</td>
+        <td>${esc(row.ctr)}</td>
+        <td>${esc(row.cpuNow) || '—'}</td>
+        <td>${esc(row.memNow) || '—'}</td>
+        <td>${esc(row.cpuReq) || '—'} / ${row.cpuLim
+          ? esc(row.cpuLim) : '<span style="color:var(--red)">не задан</span>'}</td>
+        <td>${esc(row.memReq) || '—'} / ${row.memLim
+          ? esc(row.memLim) : '<span style="color:var(--red)">не задан</span>'}</td>
+      </tr>`).join('');
+
+  return `
+    <div class="section-title">HPA — автомасштабирование</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Имя</th><th>Цель</th><th>Min</th><th>Max</th><th>Текущие</th><th>Желаемые</th></tr></thead>
+      <tbody>${hpaBody}</tbody>
+    </table></div>
+    <div class="section-title">Поды (сортировка по CPU)</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Pod</th><th>Container</th><th>CPU now</th><th>Mem now</th><th>CPU req/lim</th><th>Mem req/lim</th></tr></thead>
+      <tbody>${podBody}</tbody>
+    </table></div>`;
 }
 
-// Инициализация
-document.addEventListener('DOMContentLoaded', () => {
-    checkHealth();
-    showTab('overview');
-});
+// --- Логи ---
+function renderLogs() {
+  if (!currentReport) return `<div class="no-data">Нет данных</div>`;
+  const entries = currentReport.logs.entries || [];
+
+  const filtered = logFilter === 'all'
+    ? entries
+    : entries.filter(e => logFilter === 'error'
+        ? (e.level === 'error' || e.level === 'fatal')
+        : e.level === logFilter);
+
+  const count = (lvl) => lvl === 'all' ? entries.length
+    : lvl === 'error' ? entries.filter(e => e.level === 'error' || e.level === 'fatal').length
+    : entries.filter(e => e.level === lvl).length;
+
+  const filterBtns = [
+    ['all',  'Все'],
+    ['error','Ошибки'],
+    ['warn', 'Предупреждения'],
+  ].map(([f, label]) =>
+    `<button class="filter-btn ${logFilter === f ? 'active' : ''}" onclick="setLogFilter('${f}')">${label} (${count(f)})</button>`
+  ).join('');
+
+  const rows = filtered.length === 0
+    ? `<tr><td colspan="5" class="no-data">Нет записей</td></tr>`
+    : filtered.map(e => `<tr>
+        <td><span class="badge badge-${esc(e.level)}">${esc(e.level)}</span></td>
+        <td>${esc(e.pod)}</td>
+        <td>${esc(e.service)}</td>
+        <td class="cell-trunc">${esc(e.msg)}</td>
+        <td class="cell-trunc" style="color:var(--red);font-size:11px">${esc(e.error)}</td>
+      </tr>`).join('');
+
+  return `
+    <div class="log-filters">${filterBtns}</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Уровень</th><th>Pod</th><th>Сервис</th><th>Сообщение</th><th>Ошибка</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
+function setLogFilter(f) {
+  logFilter = f;
+  if (currentTab === 'logs') renderTab('logs');
+}
+
+// --- Проблемы ---
+function renderIssues() {
+  if (!currentReport) return `<div class="no-data">Нет данных</div>`;
+  const issues = currentReport.issues || [];
+  return issues.length === 0
+    ? `<div class="no-data">Проблем не обнаружено</div>`
+    : issues.map(issueCard).join('');
+}
+
+function issueCard(issue) {
+  const podLine = issue.pod
+    ? `<div class="issue-detail">Pod: ${esc(issue.pod)}${issue.container ? ' / ' + esc(issue.container) : ''}</div>`
+    : '';
+  const rec = issue.recommendation
+    ? `<div class="issue-rec">${esc(issue.recommendation)}</div>` : '';
+  return `<div class="issue-card sev-${esc(issue.severity)}">
+    <div class="issue-header">
+      <span class="badge badge-${esc(issue.severity)}">${esc(issue.severity)}</span>
+      <span class="muted" style="font-size:11px">${esc(issue.type)}</span>
+    </div>
+    <div class="issue-msg">${esc(issue.message)}</div>
+    ${podLine}${rec}
+  </div>`;
+}
+
+// --- События ---
+function renderEvents() {
+  if (!currentReport) return `<div class="no-data">Нет данных</div>`;
+  const events = currentReport.cluster.events || [];
+  if (events.length === 0) return `<div class="no-data">Событий нет</div>`;
+
+  const rows = events.map(e => `<tr>
+    <td style="white-space:nowrap;font-size:12px">${esc(e.last_seen)}</td>
+    <td>${esc(e.reason)}</td>
+    <td>${esc(e.object)}</td>
+    <td>${esc(e.kind)}</td>
+    <td>${e.count > 1 ? e.count : ''}</td>
+    <td class="cell-trunc">${esc(e.message)}</td>
+  </tr>`).join('');
+
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Время</th><th>Причина</th><th>Объект</th><th>Тип</th><th>Кол-во</th><th>Сообщение</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+// --- Загрузка ---
+function renderUpload() {
+  return `
+    <div class="upload-zone" id="upload-zone">
+      <input type="file" id="file-input" accept=".json,.gz">
+      <div class="upload-label">Перетащите elma-diag-*.json.gz или нажмите для выбора</div>
+      <div class="upload-hint">Создайте архив скриптом: ./diag_collector.sh</div>
+    </div>
+    <div id="upload-status"></div>`;
+}
+
+function bindUpload() {
+  const zone  = document.getElementById('upload-zone');
+  const input = document.getElementById('file-input');
+  if (!zone || !input) return;
+
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', e => { if (e.target.files[0]) doUpload(e.target.files[0]); });
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) doUpload(e.dataTransfer.files[0]);
+  });
+}
+
+async function doUpload(file) {
+  const statusEl = document.getElementById('upload-status');
+  if (statusEl) statusEl.innerHTML = '<p class="muted">Загрузка...</p>';
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  try {
+    const res  = await fetch('/api/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка сервера');
+
+    currentReport = data.report;
+    updateNsBadge(currentReport.meta.namespace);
+
+    if (statusEl) {
+      const podCount   = (currentReport.cluster.pods   || []).length;
+      const issueCount = (currentReport.issues          || []).length;
+      statusEl.innerHTML = `<div class="upload-status ok">
+        Файл загружен. Namespace: ${esc(currentReport.meta.namespace)},
+        подов: ${podCount}, проблем: ${issueCount}.
+      </div>`;
+    }
+    setTimeout(() => showTab('overview'), 1000);
+  } catch (e) {
+    if (statusEl) {
+      statusEl.innerHTML = `<div class="upload-status err">Ошибка: ${esc(e.message)}</div>`;
+    }
+  }
+}
+
+// --- Вспомогательные ---
+function parseCPU(s) {
+  if (!s) return 0;
+  if (s.endsWith('m')) return parseInt(s, 10);
+  return Math.round(parseFloat(s) * 1000);
+}
+
+function esc(s) {
+  if (!s && s !== 0) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}

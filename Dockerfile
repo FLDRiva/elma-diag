@@ -1,4 +1,4 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
@@ -7,16 +7,18 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o diag-server .
+RUN CGO_ENABLED=0 GOOS=linux go build -o diag-server .
 
-FROM alpine:latest
+FROM alpine:3.20
 
 RUN apk --no-cache add ca-certificates
 
-WORKDIR /root/
+WORKDIR /app
 
 COPY --from=builder /app/diag-server .
 COPY --from=builder /app/static ./static
+
+USER nobody
 
 EXPOSE 8080
 

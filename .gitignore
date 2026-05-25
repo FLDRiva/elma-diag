@@ -1,25 +1,15 @@
-```
-# Binaries
-diag-server/diag-server
+# Бинарники
+diag-server
 
-# Dependencies
-go.mod
-go.sum
-
-# Environment
+# Переменные окружения
 .env
 .env.local
 .env.*
 
-# Logs and temp files
-*.log
-*.tmp
-
-# Editors
+# Редакторы
 .vscode/
 .idea/
 
-# OS generated files
+# OS
 .DS_Store
 Thumbs.db
-```
