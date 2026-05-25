@@ -60,6 +60,7 @@ metadata:
   name: elma-diag
   namespace: elma-diag
 spec:
+  ingressClassName: nginx
   rules:
   - host: diag.riva.elewise.local
     http:
