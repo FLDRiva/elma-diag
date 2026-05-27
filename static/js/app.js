@@ -66,14 +66,19 @@ function renderLoad() {
   }
   rows.sort((a, b) => parseCPU(b.cpuNow) - parseCPU(a.cpuNow));
 
-  const hpaBody = hpas.length === 0
-    ? `<tr><td colspan="6" class="no-data">HPA не включены, не смотрим</td></tr>`
-    : hpas.map(h => `<tr>
-        <td>${esc(h.name)}</td><td>${esc(h.target)}</td>
-        <td>${h.min}</td><td>${h.max}</td><td>${h.current}</td>
-        <td>${h.desired !== h.current
-          ? `<span style="color:var(--yellow)">${h.desired}</span>` : h.desired}</td>
-      </tr>`).join('');
+  const hpaSection = hpas.length === 0
+  ? `<div class="section-title">HPA</div>
+       <div class="no-data">HPA не настроены. Включите Horizontal Pod Autoscaler для отображения метрик масштабирования.</div>`
+    : `<div class="section-title">HPA</div>
+       <div class="table-wrap"><table>
+         <thead><tr><th>Имя</th><th>Цель</th><th>Min</th><th>Max</th><th>Текущие</th><th>Желаемые</th></tr></thead>
+         <tbody>${hpas.map(h => `<tr>
+           <td>${esc(h.name)}</td><td>${esc(h.target)}</td>
+           <td>${h.min}</td><td>${h.max}</td><td>${h.current}</td>
+           <td>${h.desired !== h.current
+             ? `<span style="color:var(--yellow)">${h.desired}</span>` : h.desired}</td>
+         </tr>`).join('')}</tbody>
+       </table></div>`;
 
   const podBody = rows.length === 0
     ? `<tr><td colspan="6" class="no-data">Нет данных</td></tr>`
@@ -89,11 +94,7 @@ function renderLoad() {
       </tr>`).join('');
 
   return `
-    <div class="section-title">HPA</div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Имя</th><th>Цель</th><th>Min</th><th>Max</th><th>Текущие</th><th>Желаемые</th></tr></thead>
-      <tbody>${hpaBody}</tbody>
-    </table></div>
+    ${hpaSection}      
     <div class="section-title">Поды, сортировка по CPU</div>
     <div class="table-wrap"><table>
       <thead><tr><th>Pod</th><th>Container</th><th>CPU now</th><th>Mem now</th><th>CPU req/lim</th><th>Mem req/lim</th></tr></thead>

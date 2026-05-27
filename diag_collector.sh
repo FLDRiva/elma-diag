@@ -193,6 +193,47 @@ main() {
     echo "[]" > "${tmp}/entries.json"
   fi
 
+  # Собираем информацию с Postgresql, позже ниже рассмотрим монгу и потом с3.
+   local pg_secrets
+   pg_secrets=$(kubectl get secrets -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.items[] | select(.metadata.name | test("-pg$|-postgres$|app-postgres")) | .metadata.name' 2>/dev/null || echo "")
+
+     if [ -n "${pg_secrets}" ]; then
+    local tmp_dbinfo="${tmp}/.dbinfo_tmp.ndjson"
+    > "${tmp_dbinfo}"
+
+    while IFS= read -r secret_name; do
+      [ -z "${secret_name}" ] && continue
+      #Декодируем данные секрета
+      local host user pass dbname
+      host=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.data.host // empty' | base64 -d 2>/dev/null || echo "")
+      user=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.data.username // .data.user // empty' | base64 -d 2>/dev/null || echo "")
+      pass=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.data.password // .data.pass // empty' | base64 -d 2>/dev/null || echo "")
+      dbname=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.data.dbname // .data.database // .data.db // empty' | base64 -d 2>/dev/null || echo "")
+      [ -z "${host}" ] || [ -z "${user}" ] || [ -z "${pass}" ] && continue
+    #Подключаемся и выводим список владельцев (тут потом сделаею, что бы доставать логи и запросы, пока тест обработки секретов)
+    local owners_raw
+      owners_raw=$(PGPASSWORD="${pass}" psql -h "${host}" -U "${user}" -d "${dbname:-postgres}" -t -A -c "SELECT rolname FROM pg_roles WHERE rolcanlogin = true ORDER BY rolname;" 2>/dev/null || echo "")
+
+      local owners_arr="[]"
+      if [ -n "${owners_raw}" ]; then
+        owners_arr=$(echo "${owners_raw}" | jq -R -s 'split("\n") | map(select(length > 0))')
+      fi
+
+      jq -n --arg secret "${secret_name}" \
+            --arg host "${host}" \
+            --arg user "${user}" \
+            --arg dbname "${dbname:-postgres}" \
+            --argjson owners "${owners_arr}" \
+            '{secret: $secret, host: $host, user: $user, database: $dbname, owners: $owners}' >> "${tmp_dbinfo}"
+    done <<< "${pg_secrets}"
+
+    if [ -s "${tmp_dbinfo}" ]; then
+      dbinfo=$(jq -s '.' "${tmp_dbinfo}" 2>/dev/null || echo "[]")
+    fi
+  fi
+
+  echo "${dbinfo}" > "${tmp}/dbinfo.json"  
+
   # Сборка итогового JSON через --slurpfile (без передачи данных как аргументов)
   jq -n \
     --arg ns "${NAMESPACE}" \
@@ -202,10 +243,12 @@ main() {
     --slurpfile events  "${tmp}/events.json" \
     --slurpfile nodes   "${tmp}/nodes.json" \
     --slurpfile entries "${tmp}/entries.json" \
+    --slurpfile entries "${tmp}/dbinfo.json" \
     '{
       meta: {namespace: $ns, collected_at: $ts, version: "1.0"},
       cluster: {pods: $pods[0], hpas: $hpas[0], events: $events[0], nodes: $nodes[0]},
       logs: {entries: $entries[0]}
+      database: {postgresql: $dbinfo[0]}
     }' | gzip > "${JSON_ARCHIVE}"
 
   # Текстовый архив

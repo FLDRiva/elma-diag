@@ -7,6 +7,7 @@ type DiagnosticReport struct {
 	Cluster Cluster `json:"cluster"`
 	Logs    Logs    `json:"logs"`
 	Issues  []Issue `json:"issues,omitempty"`
+	Database Database `json:"database,omitempty"`
 }
 
 type Meta struct {
@@ -90,4 +91,16 @@ type Issue struct {
 	Container      string `json:"container,omitempty"`
 	Message        string `json:"message"`
 	Recommendation string `json:"recommendation,omitempty"`
+}
+
+type Database struct {
+	PostgreSQL []DBConnection `json:"database,omitempty"`
+}
+
+type DBConnection struct {
+	Secret string `json:"secret"`
+	Hosts string `json:"host"`
+	User string `json:"user"`
+	Database string `json:"databse"`
+	Owners []string `json:"owners"`
 }
