@@ -45,7 +45,7 @@ function updateNsBadge(ns) {
   if (el) el.textContent = ns;
 }
 
-// --- Нагрузка ---
+// Нагрузка
 function renderLoad() {
   if (!currentReport) return noData();
   const r = currentReport;
@@ -67,7 +67,7 @@ function renderLoad() {
   rows.sort((a, b) => parseCPU(b.cpuNow) - parseCPU(a.cpuNow));
 
   const hpaBody = hpas.length === 0
-    ? `<tr><td colspan="6" class="no-data">HPA не настроены</td></tr>`
+    ? `<tr><td colspan="6" class="no-data">HPA не включены, не смотрим</td></tr>`
     : hpas.map(h => `<tr>
         <td>${esc(h.name)}</td><td>${esc(h.target)}</td>
         <td>${h.min}</td><td>${h.max}</td><td>${h.current}</td>
@@ -89,19 +89,19 @@ function renderLoad() {
       </tr>`).join('');
 
   return `
-    <div class="section-title">HPA — автомасштабирование</div>
+    <div class="section-title">HPA</div>
     <div class="table-wrap"><table>
       <thead><tr><th>Имя</th><th>Цель</th><th>Min</th><th>Max</th><th>Текущие</th><th>Желаемые</th></tr></thead>
       <tbody>${hpaBody}</tbody>
     </table></div>
-    <div class="section-title">Поды (сортировка по CPU)</div>
+    <div class="section-title">Поды, сортировка по CPU</div>
     <div class="table-wrap"><table>
       <thead><tr><th>Pod</th><th>Container</th><th>CPU now</th><th>Mem now</th><th>CPU req/lim</th><th>Mem req/lim</th></tr></thead>
       <tbody>${podBody}</tbody>
     </table></div>`;
 }
 
-// --- Логи ---
+// Логи
 const LOG_FILTERS = [
   { key: 'error', label: 'Ошибки',         match: e => e.level === 'error' || e.level === 'fatal' },
   { key: 'warn',  label: 'Предупреждения', match: e => e.level === 'warn' },
@@ -149,7 +149,7 @@ function renderLogs() {
       <thead><tr><th>Уровень</th><th>Pod</th><th>Сервис</th><th>Сообщение</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
-    <p class="muted" style="font-size:12px;margin-top:8px">Кликните по строке для просмотра полного текста</p>`;
+    <p class="muted" style="font-size:12px;margin-top:8px">Клик выведит полный пул</p>`;
 }
 
 function setLogFilter(f) {
@@ -157,7 +157,7 @@ function setLogFilter(f) {
   if (currentTab === 'logs') renderTab('logs');
 }
 
-// --- Проблемы ---
+// Проблемы
 function renderIssues() {
   if (!currentReport) return noData();
   const issues = currentReport.issues || [];
@@ -182,7 +182,7 @@ function issueCard(issue) {
   </div>`;
 }
 
-// --- События ---
+// События
 function renderEvents() {
   if (!currentReport) return noData();
   const events = currentReport.cluster.events || [];
@@ -210,16 +210,15 @@ function renderEvents() {
       <thead><tr><th>Время</th><th>Причина</th><th>Объект</th><th>Тип</th><th>Кол-во</th><th>Сообщение</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
-    <p class="muted" style="font-size:12px;margin-top:8px">Кликните по строке для просмотра полного сообщения</p>`;
+    <p class="muted" style="font-size:12px;margin-top:8px">Клик выведит полный пул</p>`;
 }
 
-// --- Загрузка ---
+// Загрузка
 function renderUpload() {
   return `
     <div class="upload-zone" id="upload-zone">
       <input type="file" id="file-input" accept=".json,.gz">
-      <div class="upload-label">Перетащите elma-diag-*.json.gz или нажмите для выбора</div>
-      <div class="upload-hint">Создайте архив скриптом: ./diag_collector.sh</div>
+      <div class="upload-label">Перетащите или нажмите для выбора, принимает только формат json.gz</div>
     </div>
     <div id="upload-status"></div>`;
 }
@@ -270,13 +269,13 @@ async function doUpload(file) {
   }
 }
 
-// --- Раскрытие строк ---
+// Раскрытие строк
 function toggleDetail(id) {
   const el = document.getElementById(id);
   if (el) el.classList.toggle('open');
 }
 
-// --- Вспомогательные ---
+// Вспомогательные
 function parseCPU(s) {
   if (!s) return 0;
   if (s.endsWith('m')) return parseInt(s, 10);
@@ -293,5 +292,5 @@ function esc(s) {
 }
 
 function noData() {
-  return `<div class="no-data">Нет данных. Загрузите отчёт на вкладке "Загрузка".</div>`;
+  return `<div class="no-data">Ничего нет, жду загрузки.</div>`;
 }

@@ -25,7 +25,7 @@ func main() {
 	r.HandleFunc("/api/health", api.HealthHandler).Methods("GET")
 	r.HandleFunc("/api/report", api.GetReportHandler).Methods("GET")
 	r.HandleFunc("/api/upload", api.UploadHandler).Methods("POST")
-
+	// Для себя: не забывай про статику! Иначе останемся без стилей
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./static")))
 
 	srv := &http.Server{

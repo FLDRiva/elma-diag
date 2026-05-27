@@ -1,11 +1,11 @@
 #!/bin/bash
 # Скрипт сбора диагностики ELMA365.
 # Создаёт два архива:
-#   ELMA365-TIMESTAMP.tar.gz   — текстовый, для чтения / передачи в поддержку
-#   elma-diag-TIMESTAMP.json.gz — структурированный JSON для загрузки в elma-diag
+#   ELMA365-TIMESTAMP.tar.gz   — обычный архив
+#   elma-diag-TIMESTAMP.json.gz — json для отдачи в ui
 set -euo pipefail
 
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+TIMESTAMP=$(date +%Y%m%d_%H%M%)
 WORK_DIR="ELMA365-${TIMESTAMP}"
 TEXT_ARCHIVE="${WORK_DIR}.tar.gz"
 JSON_ARCHIVE="elma-diag-${TIMESTAMP}.json.gz"
@@ -53,7 +53,7 @@ detect_namespace() {
       return
     fi
   done
-  echo "Не удалось определить namespace ELMA365. Передайте его аргументом: $0 elma365" >&2
+  echo "Не удалось определить namespace ELMA365. В таком случае передай явно: $0 elma365" >&2
   exit 1
 }
 
@@ -66,7 +66,7 @@ main() {
   local entries_file="${WORK_DIR}/.log_entries.ndjson"
   > "${entries_file}"
 
-  # --- Текстовые файлы (формат ELMA365-XXXXX) ---
+  
   echo "Сбор данных кластера..."
 
   {
@@ -91,11 +91,11 @@ main() {
     kubectl describe pods -n "${NAMESPACE}" 2>/dev/null || echo "(недоступно)"
   } > "${WORK_DIR}/describes.txt"
 
-  # --- Сбор JSON данных кластера ---
+  
   local pods_raw
   pods_raw=$(kubectl get pods -n "${NAMESPACE}" -o json 2>/dev/null)
 
-  # Метрики CPU/mem из kubectl top
+  
   local top_json="{}"
   if top_raw=$(kubectl top pod -n "${NAMESPACE}" --containers --no-headers 2>/dev/null); then
     top_json=$(echo "${top_raw}" | \
@@ -103,7 +103,7 @@ main() {
       jq -s 'map({"key": (.pod + "/" + .ctr), "value": {cpu: .cpu, mem: .mem}}) | from_entries' 2>/dev/null || echo "{}")
   fi
 
-  # --- Логи подов ---
+  
   echo "Сбор логов..."
   local pod_names
   pod_names=$(echo "${pods_raw}" | jq -r '.items[].metadata.name')
@@ -124,13 +124,12 @@ main() {
     done <<< "${ctrs}"
   done <<< "${pod_names}"
 
-  # --- Формирование JSON ---
-  # Используем файлы вместо --argjson чтобы обойти лимит длины аргументов
+
   echo "Формирование JSON отчёта..."
   local tmp="${WORK_DIR}/.tmp"
   mkdir -p "${tmp}"
 
-  # top_json в файл для передачи в jq через --slurpfile
+  # top_json в файл для передачи в jq через --slurpfile спасибо qwen
   echo "${top_json}" > "${tmp}/top.json"
 
   # pods
@@ -216,11 +215,8 @@ main() {
 
   echo ""
   echo "Готово!"
-  echo "  Текстовый архив:  ${TEXT_ARCHIVE}"
-  echo "  JSON архив:       ${JSON_ARCHIVE}"
-  echo ""
-  echo "Загрузка в elma-diag:"
-  echo "  curl -F file=@${JSON_ARCHIVE} http://elma-diag/api/upload"
+  echo "  Обычный архив:  ${TEXT_ARCHIVE}"
+  echo "  JSON для ui:       ${JSON_ARCHIVE}"
 }
 
 main "$@"

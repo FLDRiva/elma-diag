@@ -28,7 +28,7 @@ func GetReportHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stored)
 }
 
-// UploadHandler принимает elma-diag-*.json.gz, запускает анализ и сохраняет отчёт.
+// UploadHandler принимает архив json, запускает анализ и сохраняет отчёт.
 func UploadHandler(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(100 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "ошибка разбора формы: "+err.Error())
@@ -68,7 +68,7 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if rep.Meta.Namespace == "" {
-		writeError(w, http.StatusBadRequest, "файл не является отчётом elma-diag (нет поля meta.namespace)")
+		writeError(w, http.StatusBadRequest, "нет поля meta.namespace")
 		return
 	}
 

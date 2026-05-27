@@ -1,7 +1,7 @@
 package models
 
 // DiagnosticReport — полный отчёт, хранится в памяти после загрузки.
-// Поля Meta/Cluster/Logs приходят из скрипта, Issues добавляет анализатор.
+// Поля Meta/Cluster/Logs приходят из скрипта, после загрузки в интерфейс.
 type DiagnosticReport struct {
 	Meta    Meta    `json:"meta"`
 	Cluster Cluster `json:"cluster"`

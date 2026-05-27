@@ -6,7 +6,7 @@ import (
 	"elma-diag/models"
 )
 
-// Analyze проверяет отчёт и возвращает список найденных проблем.
+// Проверяет отчёт и возвращает список найденных проблем.
 func Analyze(report *models.DiagnosticReport) []models.Issue {
 	var issues []models.Issue
 	issues = append(issues, checkPods(report.Cluster.Pods)...)
@@ -118,17 +118,17 @@ func checkLogs(entries []models.LogEntry) []models.Issue {
 func recommend(issue models.Issue) string {
 	switch issue.Type {
 	case "oom":
-		return "Увеличьте limits.memory в deployment"
+		return "Возможно нужно увеличить лимит памяти в deployment пода, посмотри внимательно дискрайб"
 	case "crashloop":
-		return "Проверьте логи предыдущего запуска: kubectl logs " + issue.Pod + " --previous"
+		return "Проверь логи предыдущего запуска: kubectl logs " + issue.Pod + " --previous"
 	case "no_limits":
-		return "Добавьте resources.limits.cpu и resources.limits.memory"
+		return "Надо добавить ресурсов cpu и memory"
 	case "pod_status":
 		return "kubectl describe pod " + issue.Pod
 	case "event":
 		return "kubectl describe pod " + issue.Pod
 	case "log_errors":
-		return "Откройте вкладку Логи для деталей"
+		return "Открой вкладку Логи для деталей"
 	}
-	return "Требуется ручной анализ"
+	return "Проваливаемся в архив, который собрался 2 и чекаем"
 }
