@@ -5,14 +5,14 @@
 #   elma-diag-TIMESTAMP.json.gz — json для отдачи в ui
 set -euo pipefail
 
-TIMESTAMP=$(date +%Y%m%d_%H%M%)
+TIMESTAMP=$(date +%Y.%m.%d_%H:%M)
 WORK_DIR="ELMA365-${TIMESTAMP}"
 TEXT_ARCHIVE="${WORK_DIR}.tar.gz"
 JSON_ARCHIVE="elma-diag-${TIMESTAMP}.json.gz"
-LOG_TAIL=2000
+LOG_TAIL=1000
 MAX_ERROR=200
 MAX_INFO=50
-MAX_DEBUG=20
+MAX_DEBUG=50
 NAMESPACE=""
 
 # Парсит log_file и добавляет записи с нужным уровнем в entries_file
