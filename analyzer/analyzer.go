@@ -50,15 +50,6 @@ func checkPods(pods []models.Pod) []models.Issue {
 					Message:   fmt.Sprintf("Контейнер перезапущен %d раз", c.Restarts),
 				})
 			}
-			if c.CPULim == "" && c.MemLim == "" {
-				issues = append(issues, models.Issue{
-					Type:      "no_limits",
-					Severity:  "medium",
-					Pod:       pod.Name,
-					Container: c.Name,
-					Message:   "Не заданы resource limits",
-				})
-			}
 		}
 	}
 	return issues
@@ -118,17 +109,17 @@ func checkLogs(entries []models.LogEntry) []models.Issue {
 func recommend(issue models.Issue) string {
 	switch issue.Type {
 	case "oom":
-		return "Возможно нужно увеличить лимит памяти в deployment пода, посмотри внимательно дискрайб"
+		return ""
 	case "crashloop":
-		return "Проверь логи предыдущего запуска: kubectl logs " + issue.Pod + " --previous"
+		return ""
 	case "no_limits":
-		return "Надо добавить ресурсов cpu и memory"
+		return ""
 	case "pod_status":
 		return "kubectl describe pod " + issue.Pod
 	case "event":
 		return "kubectl describe pod " + issue.Pod
 	case "log_errors":
-		return "Открой вкладку Логи для деталей"
+		return "Смотри в логи"
 	}
 	return "Проваливаемся в архив, который собрался 2 и чекаем"
 }

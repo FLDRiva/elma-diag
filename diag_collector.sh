@@ -5,7 +5,7 @@
 #   elma-diag-TIMESTAMP.json.gz — json для отдачи в ui
 set -euo pipefail
 
-TIMESTAMP=$(date +%Y.%m.%d_%H:%M)
+TIMESTAMP=$(date +%Y.%m.%d_%H-%M)
 WORK_DIR="ELMA365-${TIMESTAMP}"
 TEXT_ARCHIVE="${WORK_DIR}.tar.gz"
 JSON_ARCHIVE="elma-diag-${TIMESTAMP}.json.gz"
@@ -15,24 +15,24 @@ MAX_INFO=50
 MAX_DEBUG=50
 NAMESPACE=""
 
-# Парсит log_file и добавляет записи с нужным уровнем в entries_file
+# Сделал парсинг с jq один раз на все итеррации
 parse_log_level() {
   local log_file="$1" pod="$2" pattern="$3" limit="$4"
+  
   grep -E "\"level\"\s*:\s*\"(${pattern})\"" "${log_file}" 2>/dev/null | \
     head -n "${limit}" | \
-    while IFS= read -r line; do
-      local json_part
-      json_part=$(echo "${line}" | sed 's/^[^{]*//')
-      echo "${json_part}" | jq -c --arg pod "${pod}" \
-        'select(.level != null and .msg != null) | {
-          pod: $pod,
-          level: .level,
-          time: (.timestamp // ""),
-          service: (.logger // "" | ltrimstr("elma365.") | split(".") | .[0]),
-          msg: .msg,
-          error: (.error // "")
-        }' 2>/dev/null
-    done >> "${entries_file}" || true
+    jq -R -c --arg pod "${pod}" '
+      fromjson? // empty |
+      select(.level != null and .msg != null) |
+      {
+        pod: $pod,
+        level: .level,
+        time: (.timestamp // ""),
+        service: (.logger // "" | ltrimstr("elma365.") | split(".") | .[0]),
+        msg: .msg,
+        error: (.error // "")
+      }
+    ' 2>/dev/null >> "${entries_file}" || true
 }
 
 check_deps() {
@@ -61,41 +61,18 @@ main() {
   check_deps
   detect_namespace "${1:-}"
   echo "Namespace: ${NAMESPACE}"
-
+  
+  trap 'rm -rf "${WORK_DIR}"' EXIT
+  
   mkdir -p "${WORK_DIR}/pod_logs"
   local entries_file="${WORK_DIR}/.log_entries.ndjson"
   > "${entries_file}"
 
-  
   echo "Сбор данных кластера..."
 
-  {
-    echo "### All resources in all namespaces"
-    echo "$ kubectl get all -A -o wide"
-    kubectl get all -A -o wide 2>/dev/null || echo "(недоступно)"
-  } > "${WORK_DIR}/general_info.txt"
-
-  {
-    echo "### All resources in namespace (${NAMESPACE})"
-    echo "$ kubectl get all -n ${NAMESPACE} -o wide"
-    kubectl get all -n "${NAMESPACE}" -o wide 2>/dev/null || echo "(недоступно)"
-    echo ""
-    echo "### Node descriptions"
-    echo "$ kubectl describe nodes"
-    kubectl describe nodes 2>/dev/null || echo "(недоступно)"
-  } > "${WORK_DIR}/main_info.txt"
-
-  {
-    echo "### Pod descriptions in namespace ${NAMESPACE}"
-    echo "$ kubectl describe pods -n ${NAMESPACE}"
-    kubectl describe pods -n "${NAMESPACE}" 2>/dev/null || echo "(недоступно)"
-  } > "${WORK_DIR}/describes.txt"
-
-  
   local pods_raw
   pods_raw=$(kubectl get pods -n "${NAMESPACE}" -o json 2>/dev/null)
 
-  
   local top_json="{}"
   if top_raw=$(kubectl top pod -n "${NAMESPACE}" --containers --no-headers 2>/dev/null); then
     top_json=$(echo "${top_raw}" | \
@@ -103,7 +80,6 @@ main() {
       jq -s 'map({"key": (.pod + "/" + .ctr), "value": {cpu: .cpu, mem: .mem}}) | from_entries' 2>/dev/null || echo "{}")
   fi
 
-  
   echo "Сбор логов..."
   local pod_names
   pod_names=$(echo "${pods_raw}" | jq -r '.items[].metadata.name')
@@ -124,12 +100,10 @@ main() {
     done <<< "${ctrs}"
   done <<< "${pod_names}"
 
-
   echo "Формирование JSON отчёта..."
   local tmp="${WORK_DIR}/.tmp"
   mkdir -p "${tmp}"
 
-  # top_json в файл для передачи в jq через --slurpfile спасибо qwen
   echo "${top_json}" > "${tmp}/top.json"
 
   # pods
@@ -193,26 +167,160 @@ main() {
     echo "[]" > "${tmp}/entries.json"
   fi
 
-  # Собираем информацию с Postgresql, позже ниже рассмотрим монгу и потом с3.
-   local pg_secrets
-   pg_secrets=$(kubectl get secrets -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.items[] | select(.metadata.name | test("-pg$|-postgres$|app-postgres")) | .metadata.name' 2>/dev/null || echo "")
+  # PG тестим
 
-     if [ -n "${pg_secrets}" ]; then
+  local pg_secrets
+  pg_secrets=$(kubectl get secrets -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.items[] | select(.metadata.name == "elma365-db-connections" or (.metadata.name | test("-pg$|-postgres$|app-postgres"))) | .metadata.name' 2>/dev/null || echo "")
+
+  # Инициализация переменной dbinfo
+  local dbinfo="[]"
+
+  if [ -n "${pg_secrets}" ]; then
     local tmp_dbinfo="${tmp}/.dbinfo_tmp.ndjson"
     > "${tmp_dbinfo}"
 
     while IFS= read -r secret_name; do
       [ -z "${secret_name}" ] && continue
-      #Декодируем данные секрета
-      local host user pass dbname
-      host=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.data.host // empty' | base64 -d 2>/dev/null || echo "")
-      user=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.data.username // .data.user // empty' | base64 -d 2>/dev/null || echo "")
-      pass=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.data.password // .data.pass // empty' | base64 -d 2>/dev/null || echo "")
-      dbname=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.data.dbname // .data.database // .data.db // empty' | base64 -d 2>/dev/null || echo "")
+
+      # Получаем секрет
+      local secret_json
+      secret_json=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" -o json 2>/dev/null) || continue
+
+      local secret_keys
+      secret_keys=$(echo "${secret_json}" | jq -r '.data | keys[]' 2>/dev/null || echo "")
+
+      local url_keys
+      url_keys=$(echo "${secret_keys}" | grep -E '^(PSQL_URL|ELMA365_POOL_POSTGRES_URL|RO_POSTGRES_URL|POSTGRES_URL)$' || echo "")
+
+      if [ -n "${url_keys}" ]; then
+        # Обработка секрета с URL подключениями
+        while IFS= read -r url_key; do
+          [ -z "${url_key}" ] && continue
+
+          # Декодируем URL через jq @base64d
+          local psql_url
+          psql_url=$(echo "${secret_json}" | jq -r --arg k "${url_key}" '.data[$k] // empty | @base64d' 2>/dev/null || echo "")
+
+          [ -z "${psql_url}" ] && continue
+
+          # Парсим URL: postgresql://user:password@host:port/dbname?params
+          local user host port dbname pass
+          user=$(echo "${psql_url}" | sed -n 's|^postgresql://\([^:]*\):.*|\1|p')
+          pass=$(echo "${psql_url}" | sed -n 's|^postgresql://[^:]*:\([^@]*\)@.*|\1|p')
+          host=$(echo "${psql_url}" | sed -n 's|^postgresql://[^@]*@\([^:/]*\).*|\1|p')
+          port=$(echo "${psql_url}" | sed -n 's|^postgresql://[^@]*@[^:]*:\([0-9]*\).*|\1|p')
+          dbname=$(echo "${psql_url}" | sed -n 's|^postgresql://[^@]*@[^/]*\/\([^?]*\).*|\1|p')
+
+          [ -z "${host}" ] || [ -z "${user}" ] || [ -z "${pass}" ] && continue
+
+          #таймауты к psql
+          local owners_raw
+          owners_raw=$(PGPASSWORD="${pass}" psql \
+            -h "${host}" \
+            -p "${port:-5432}" \
+            -U "${user}" \
+            -d "${dbname:-postgres}" \
+            -t -A \
+            --connect-timeout=3 \
+            -c "set statement_timeout=2000;" \
+            -c "SELECT rolname FROM pg_roles WHERE rolcanlogin = true ORDER BY rolname;" \
+            2>/dev/null || echo "")
+
+          local owners_arr="[]"
+          if [ -n "${owners_raw}" ]; then
+            owners_arr=$(echo "${owners_raw}" | jq -R -s 'split("\n") | map(select(length > 0))')
+          fi
+
+          jq -n --arg secret "${secret_name}" \
+                --arg key "${url_key}" \
+                --arg host "${host}" \
+                --arg user "${user}" \
+                --arg dbname "${dbname:-postgres}" \
+                --argjson owners "${owners_arr}" \
+                '{secret: $secret, connection: $key, host: $host, user: $user, database: $dbname, owners: $owners}' >> "${tmp_dbinfo}"
+        done <<< "${url_keys}"
+
+        [ -s "${tmp_dbinfo}" ] && continue
+      fi
+
+      # Обработка стандартного секрета с отдельными полями
+      local host="" user="" pass="" dbname=""
+
+      # Извлекаем все поля за один вызов jq
+      read -r host user pass dbname < <(echo "${secret_json}" | jq -r '
+        [
+          (.data.host // "" | @base64d),
+          (.data.username // .data.user // "" | @base64d),
+          (.data.password // .data.pass // "" | @base64d),
+          (.data.dbname // .data.database // .data.db // "" | @base64d)
+        ] | @tsv
+      ' 2>/dev/null || echo -e "\t\t\t")
+
+      # Если это составной секрет (несколько подключений), ищем подключения по префиксам
+      if [ -z "${host}" ] || [ -z "${user}" ]; then
+        # Ищем все уникальные префиксы в ключах
+        local prefixes
+        prefixes=$(echo "${secret_keys}" | sed 's/-host$//; s/-username$//; s/-user$//; s/-password$//; s/-pass$//; s/-dbname$//; s/-database$//; s/-db$//' | sort -u | grep -v '^$' || echo "")
+
+        while IFS= read -r prefix; do
+          [ -z "${prefix}" ] && continue
+
+          local p_host p_user p_pass p_dbname
+
+          read -r p_host p_user p_pass p_dbname < <(echo "${secret_json}" | jq -r --arg pfx "${prefix}" '
+            [
+              (.data[($pfx + "-host")] // "" | @base64d),
+              (.data[($pfx + "-username")] // .data[($pfx + "-user")] // "" | @base64d),
+              (.data[($pfx + "-password")] // .data[($pfx + "-pass")] // "" | @base64d),
+              (.data[($pfx + "-dbname")] // .data[($pfx + "-database")] // .data[($pfx + "-db")] // "" | @base64d)
+            ] | @tsv
+          ' 2>/dev/null || echo -e "\t\t\t")
+
+          [ -z "${p_host}" ] || [ -z "${p_user}" ] && continue
+
+          # Добавляем таймауты к psql
+          local owners_raw
+          owners_raw=$(PGPASSWORD="${p_pass}" psql \
+            -h "${p_host}" \
+            -U "${p_user}" \
+            -d "${p_dbname:-postgres}" \
+            -t -A \
+            --connect-timeout=3 \
+            -c "set statement_timeout=2000;" \
+            -c "SELECT rolname FROM pg_roles WHERE rolcanlogin = true ORDER BY rolname;" \
+            2>/dev/null || echo "")
+
+          local owners_arr="[]"
+          if [ -n "${owners_raw}" ]; then
+            owners_arr=$(echo "${owners_raw}" | jq -R -s 'split("\n") | map(select(length > 0))')
+          fi
+
+          jq -n --arg secret "${secret_name}" \
+                --arg prefix "${prefix}" \
+                --arg host "${p_host}" \
+                --arg user "${p_user}" \
+                --arg dbname "${p_dbname:-postgres}" \
+                --argjson owners "${owners_arr}" \
+                '{secret: $secret, connection: $prefix, host: $host, user: $user, database: $dbname, owners: $owners}' >> "${tmp_dbinfo}"
+        done <<< "${prefixes}"
+
+        [ -s "${tmp_dbinfo}" ] && continue
+      fi
+
+      # Стандартный секрет с одним подключением
       [ -z "${host}" ] || [ -z "${user}" ] || [ -z "${pass}" ] && continue
-    #Подключаемся и выводим список владельцев (тут потом сделаею, что бы доставать логи и запросы, пока тест обработки секретов)
-    local owners_raw
-      owners_raw=$(PGPASSWORD="${pass}" psql -h "${host}" -U "${user}" -d "${dbname:-postgres}" -t -A -c "SELECT rolname FROM pg_roles WHERE rolcanlogin = true ORDER BY rolname;" 2>/dev/null || echo "")
+
+      # Добавляем таймауты к psql
+      local owners_raw
+      owners_raw=$(PGPASSWORD="${pass}" psql \
+        -h "${host}" \
+        -U "${user}" \
+        -d "${dbname:-postgres}" \
+        -t -A \
+        --connect-timeout=3 \
+        -c "set statement_timeout=2000;" \
+        -c "SELECT rolname FROM pg_roles WHERE rolcanlogin = true ORDER BY rolname;" \
+        2>/dev/null || echo "")
 
       local owners_arr="[]"
       if [ -n "${owners_raw}" ]; then
@@ -232,9 +340,9 @@ main() {
     fi
   fi
 
-  echo "${dbinfo}" > "${tmp}/dbinfo.json"  
+  echo "${dbinfo}" > "${tmp}/dbinfo.json"
 
-  # Сборка итогового JSON через --slurpfile (без передачи данных как аргументов)
+  # Сборка итогового JSON 
   jq -n \
     --arg ns "${NAMESPACE}" \
     --arg ts "$(date -Iseconds)" \
@@ -243,23 +351,19 @@ main() {
     --slurpfile events  "${tmp}/events.json" \
     --slurpfile nodes   "${tmp}/nodes.json" \
     --slurpfile entries "${tmp}/entries.json" \
-    --slurpfile entries "${tmp}/dbinfo.json" \
+    --slurpfile dbinfo  "${tmp}/dbinfo.json" \
     '{
       meta: {namespace: $ns, collected_at: $ts, version: "1.0"},
       cluster: {pods: $pods[0], hpas: $hpas[0], events: $events[0], nodes: $nodes[0]},
-      logs: {entries: $entries[0]}
-      database: {postgresql: $dbinfo[0]}
+      logs: {entries: $entries[0]},
+      database: {postgresql: ($dbinfo[0] // [])}
     }' | gzip > "${JSON_ARCHIVE}"
 
-  # Текстовый архив
-  rm -f "${entries_file}"
-  tar -czf "${TEXT_ARCHIVE}" "${WORK_DIR}"
   rm -rf "${WORK_DIR}"
 
   echo ""
-  echo "Готово!"
-  echo "  Обычный архив:  ${TEXT_ARCHIVE}"
-  echo "  JSON для ui:       ${JSON_ARCHIVE}"
+  echo "Готово"
+  echo "  JSON для ui:    ${JSON_ARCHIVE}"
 }
 
 main "$@"

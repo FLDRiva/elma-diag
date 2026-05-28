@@ -36,7 +36,9 @@ function renderTab(tab) {
     case 'logs':   el.innerHTML = renderLogs();   break;
     case 'issues': el.innerHTML = renderIssues(); break;
     case 'events': el.innerHTML = renderEvents(); break;
+    case 'database': el.innerHTML = renderDatabase(); break;
     case 'upload': el.innerHTML = renderUpload(); bindUpload(); break;
+
   }
 }
 
@@ -49,7 +51,6 @@ function updateNsBadge(ns) {
 function renderLoad() {
   if (!currentReport) return noData();
   const r = currentReport;
-  const hpas = r.cluster.hpas || [];
   const pods  = r.cluster.pods || [];
 
   const rows = [];
@@ -66,20 +67,6 @@ function renderLoad() {
   }
   rows.sort((a, b) => parseCPU(b.cpuNow) - parseCPU(a.cpuNow));
 
-  const hpaSection = hpas.length === 0
-  ? `<div class="section-title">HPA</div>
-       <div class="no-data">HPA не настроены. Включите Horizontal Pod Autoscaler для отображения метрик масштабирования.</div>`
-    : `<div class="section-title">HPA</div>
-       <div class="table-wrap"><table>
-         <thead><tr><th>Имя</th><th>Цель</th><th>Min</th><th>Max</th><th>Текущие</th><th>Желаемые</th></tr></thead>
-         <tbody>${hpas.map(h => `<tr>
-           <td>${esc(h.name)}</td><td>${esc(h.target)}</td>
-           <td>${h.min}</td><td>${h.max}</td><td>${h.current}</td>
-           <td>${h.desired !== h.current
-             ? `<span style="color:var(--yellow)">${h.desired}</span>` : h.desired}</td>
-         </tr>`).join('')}</tbody>
-       </table></div>`;
-
   const podBody = rows.length === 0
     ? `<tr><td colspan="6" class="no-data">Нет данных</td></tr>`
     : rows.map(row => `<tr class="${row.noLimits ? 'row-warn' : ''}">
@@ -94,7 +81,6 @@ function renderLoad() {
       </tr>`).join('');
 
   return `
-    ${hpaSection}      
     <div class="section-title">Поды, сортировка по CPU</div>
     <div class="table-wrap"><table>
       <thead><tr><th>Pod</th><th>Container</th><th>CPU now</th><th>Mem now</th><th>CPU req/lim</th><th>Mem req/lim</th></tr></thead>
@@ -212,6 +198,45 @@ function renderEvents() {
       <tbody>${rows}</tbody>
     </table></div>
     <p class="muted" style="font-size:12px;margin-top:8px">Клик выведит полный пул</p>`;
+}
+
+function renderDatabase() {
+  if (!currentReport) return noData();
+  
+  const db = currentReport.database?.postgresql || [];
+  
+  if (db.length === 0) {
+    return `<div class="no-data">Данные базы не спарсились</div>`;
+  }
+
+  const rows = db.map(conn => {
+    
+    const owners = (conn.Owners && conn.Owners.length > 0)
+      ? conn.Owners.map(esc).join(', ')
+      : '<span class="muted">—</span>';
+    
+    return `<tr>
+      <td>${esc(conn.host)}</td>
+      <td>${esc(conn.user)}</td>
+      <td><strong>${esc(conn.database)}</strong></td>
+      <td>${owners}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="section-title">PG</div>
+    <div class="table-wrap"><table>
+      <thead>
+        <tr>
+          <th>Host</th>
+          <th>User</th>
+          <th>Database</th>
+          <th>Owners</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  `;
 }
 
 // Загрузка

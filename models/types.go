@@ -1,13 +1,11 @@
 package models
 
-// DiagnosticReport — полный отчёт, хранится в памяти после загрузки.
-// Поля Meta/Cluster/Logs приходят из скрипта, после загрузки в интерфейс.
 type DiagnosticReport struct {
 	Meta    Meta    `json:"meta"`
 	Cluster Cluster `json:"cluster"`
 	Logs    Logs    `json:"logs"`
 	Issues  []Issue `json:"issues,omitempty"`
-	Database Database `json:"database,omitempty"`
+	Database Database `json:"database"`
 }
 
 type Meta struct {
@@ -94,13 +92,13 @@ type Issue struct {
 }
 
 type Database struct {
-	PostgreSQL []DBConnection `json:"database,omitempty"`
+	PostgreSQL []DBConnection `json:"postgresql"`
 }
 
 type DBConnection struct {
 	Secret string `json:"secret"`
-	Hosts string `json:"host"`
+	Host string `json:"host"`
 	User string `json:"user"`
-	Database string `json:"databse"`
+	Database string `json:"database"`
 	Owners []string `json:"owners"`
 }
