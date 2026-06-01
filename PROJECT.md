@@ -37,7 +37,7 @@ elma-diag/
 ├── models/
 │   └── types.go             — DiagnosticReport, Pod, Container, HPA, Event, Node, LogEntry, Issue
 ├── static/
-│   ├── index.html           — оболочка, 5 вкладок
+│   ├── index.html           — оболочка, 6 вкладок
 │   ├── css/style.css        — тёмная тема
 │   └── js/app.js            — рендер вкладок из /api/report
 ├── diag_collector.sh        — скрипт сбора диагностики
@@ -91,6 +91,11 @@ elma-diag/
       { "pod": "main-xxx", "level": "error", "time": "...", "service": "main", "msg": "...", "error": "..." }
     ]
   },
+  "database": {
+    "postgresql": [
+      { "host": "...", "user": "...", "database": "...", "Owners": ["..."] }
+    ]
+  },
   "issues": [
     { "type": "oom", "severity": "critical", "pod": "main-xxx", "container": "main", "message": "...", "recommendation": "..." }
   ]
@@ -99,7 +104,7 @@ elma-diag/
 
 ## Анализатор
 
-`analyzer/analyzer.go` проверяет отчёт и возвращает `[]Issue`:
+`analyzer/analyzer.go` — `Analyze(*DiagnosticReport) []Issue`:
 
 | Тип | Условие | Severity |
 |-----|---------|----------|
@@ -117,10 +122,11 @@ elma-diag/
 
 | Вкладка | Содержимое |
 |---------|-----------|
-| Нагрузка | HPA + поды, сортировка по CPU, подсветка отсутствующих лимитов |
+| Нагрузка | Поды, сортировка по CPU, подсветка отсутствующих лимитов |
 | Логи | Фильтры: Ошибки / Предупреждения / Инфо / Дебаг, клик → полный текст |
 | Проблемы | Карточки с severity, pod, рекомендацией |
 | События | Таблица событий, клик → полное сообщение |
+| База | PostgreSQL: host, user, database, owners из `report.database.postgresql` |
 | Загрузка | Drag-and-drop / выбор файла, POST /api/upload |
 
 ## Скрипт diag_collector.sh
@@ -130,7 +136,7 @@ elma-diag/
 
 ### Запуск
 ```bash
-# Автоопределение namespace
+# Автоопределение namespace (ищет elma365, затем elma)
 ./diag_collector.sh
 
 # Явный namespace
@@ -153,15 +159,17 @@ ELMA365-TIMESTAMP/
     └── {pod}-{container}.log
 ```
 
-## Kubernetes
-
-### Namespace
+### Обновить скрипт на сервере
 ```bash
-kubectl create namespace elma-diag
+curl -O https://raw.githubusercontent.com/FLDRiva/elma-diag/main/diag_collector.sh
+chmod +x diag_collector.sh
 ```
+
+## Kubernetes
 
 ### Применить манифест
 ```bash
+kubectl create namespace elma-diag
 curl -O https://raw.githubusercontent.com/FLDRiva/elma-diag/main/k8s/k8s-deployment.yaml
 kubectl apply -f k8s-deployment.yaml
 ```
@@ -203,13 +211,6 @@ kubectl rollout status deployment/elma-diag -n elma-diag
 kubectl apply -f k8s-deployment.yaml
 ```
 
-## Обновить скрипт на сервере
-
-```bash
-curl -O https://raw.githubusercontent.com/FLDRiva/elma-diag/main/diag_collector.sh
-chmod +x diag_collector.sh
-```
-
 ## API
 
 | Метод | Путь | Описание |
@@ -218,15 +219,15 @@ chmod +x diag_collector.sh
 | GET | /api/report | Текущий отчёт (null если не загружен) |
 | POST | /api/upload | Загрузка json или json.gz, поле `file` |
 
-Лимит загрузки: 100 МБ форма, 50 МБ файл после распаковки.
+Лимит: 100 МБ форма, 50 МБ файл после распаковки.
 
 ## Git история
 
 ```
+d2c3de0 docs: добавил PROJECT.md
 93eaa8c fix: jq падал с 'Argument list too long' на больших кластерах
 14b1b4c feat: убрал обзор, новые фильтры логов, раскрываемые строки
 96dffea fix: скрипт падал когда grep не находил ошибок в логах пода
-185b2ed fix: добавил прогресс сбора логов
 223de18 fix: добавил ingressClassName: nginx
 dff55bd fix: убрал лишнюю аннотацию rewrite-target из ingress
 2e6bc8d fix: ingress host diag.riva.elewise.local
