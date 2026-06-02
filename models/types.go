@@ -67,7 +67,20 @@ type Node struct {
 	CPU     string `json:"cpu"`
 	Memory  string `json:"memory"`
 	Version string `json:"version"`
+	OS                string `json:"os,omitempty"`
+	Kernel            string `json:"kernel,omitempty"`
+	Kubelet           string `json:"kubelet,omitempty"`
+	ContainerRuntime  string `json:"container_runtime,omitempty"`
+	CPUCapacity       int    `json:"cpu_capacity,omitempty"`
+	CPUAllocatable    int    `json:"cpu_allocatable,omitempty"`
+	MemoryCapacityKB  int    `json:"memory_capacity_kb,omitempty"`
+	MemoryAllocatableKB int  `json:"memory_allocatable_kb,omitempty"`
+	CPUUsed           string `json:"cpu_used,omitempty"`
+	MemUsed           string `json:"mem_used,omitempty"`
+	LoadAvg           string `json:"load_avg,omitempty"`
+	DiskIOPS          string `json:"disk_iops,omitempty"`
 }
+
 
 type Logs struct {
 	Entries []LogEntry `json:"entries"`

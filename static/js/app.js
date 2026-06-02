@@ -38,6 +38,7 @@ function renderTab(tab) {
     case 'events': el.innerHTML = renderEvents(); break;
     case 'database': el.innerHTML = renderDatabase(); break;
     case 'upload': el.innerHTML = renderUpload(); bindUpload(); break;
+    case 'nodes': el.innerHTML = renderNodes(); break;
 
   }
 }
@@ -237,6 +238,69 @@ function renderDatabase() {
       <tbody>${rows}</tbody>
     </table></div>
   `;
+}
+
+//Ноды
+
+function renderNodes() {
+ if (!currentReport) return noData();
+  const nodes = currentReport.cluster.nodes || [];
+  
+  if (nodes.length === 0) return `<div class="no-data">Нет данных о нодах</div>`;
+
+  const rows = nodes.map(n => {
+
+    let cpuPct = null;
+    if (n.cpu_capacity && n.cpu_used) {
+      let usedVal = parseFloat(n.cpu_used);
+      if (usedVal > 100) usedVal = usedVal / 1000;
+      cpuPct = Math.round((usedVal / n.cpu_capacity) * 100);
+    }
+    
+    let memPct = null;
+    if (n.memory_capacity_kb && n.mem_used) {
+      let capMiB = n.memory_capacity_kb / 1024;
+      let usedVal = parseFloat(n.mem_used);
+      memPct = Math.round((usedVal / capMiB) * 100);
+    }
+
+    const capMemGB = n.memory_capacity_kb ? (n.memory_capacity_kb / 1024 / 1024).toFixed(1) : '—';
+    
+    return `<tr>
+      <td>
+        <strong>${esc(n.name)}</strong><br>
+        <span class="muted" style="font-size:11px">${esc(n.os || '').split('(')[0]}</span>
+      </td>
+      <td>
+        <div>${n.cpu_capacity} vCPU</div>
+        ${cpuPct !== null ? `
+          <div class="metric-bar" style="margin-top:4px">
+            <div class="fill ${cpuPct > 80 ? 'err' : cpuPct > 60 ? 'warn' : 'ok'}" style="width:${Math.min(cpuPct, 100)}%"></div>
+          </div>
+          <small>${cpuPct}% used (${n.cpu_used || 0})</small>
+        ` : '<small class="muted">Нет метрик</small>'}
+      </td>
+      <td>
+        <div>${capMemGB} GB</div>
+        ${memPct !== null ? `
+          <div class="metric-bar" style="margin-top:4px">
+            <div class="fill ${memPct > 80 ? 'err' : memPct > 60 ? 'warn' : 'ok'}" style="width:${Math.min(memPct, 100)}%"></div>
+          </div>
+          <small>${memPct}% used (${n.mem_used || 0} Mi)</small>
+        ` : '<small class="muted">Нет метрик</small>'}
+      </td>
+      <td>${esc(n.load_avg || '—')}</td>
+      <td>${esc(n.disk_iops || '—')}</td>
+      <td><span class="badge ${n.ready ? 'ok' : 'err'}">${n.ready ? 'Ready' : 'NotReady'}</span></td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="section-title">Ноды кластера</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Node</th><th>CPU</th><th>Memory</th><th>Load Avg</th><th>Disk IOPS</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
 }
 
 // Загрузка
