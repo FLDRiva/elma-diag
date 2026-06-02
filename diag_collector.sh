@@ -61,6 +61,8 @@ detect_namespace() {
 pg_extra_json() {
   local h="$1" p="${2:-5432}" u="$3" pw="$4" db="${5:-postgres}"
 
+  echo "  DEBUG pg_extra_json: h=$h u=$u db=$db psql=$(command -v psql 2>/dev/null || echo 'NOT FOUND')" >&2
+
   # Один SQL-запрос возвращает всё как JSON
   local sql
   sql=$(cat <<'ENDSQL'
@@ -356,7 +358,7 @@ main() {
           [ -z "${host}" ] || [ -z "${user}" ] || [ -z "${pass}" ] && continue
 
           local pgdata owners_arr extra_fields
-          pgdata=$(pg_extra_json "${host}" "${port:-5432}" "${user}" "${pass}" "${dbname:-postgres}" 2>/dev/null || true)
+          pgdata=$(pg_extra_json "${host}" "${port:-5432}" "${user}" "${pass}" "${dbname:-postgres}" 2>&1 || true)
           [ -z "$pgdata" ] && pgdata='{"owners":[],"server_info":null,"stats":{},"config":[]}'
           owners_arr=$(printf '%s' "$pgdata" | jq -c '.owners // []' 2>/dev/null || echo '[]')
           extra_fields=$(printf '%s' "$pgdata" | jq -c '{server_info: .server_info, stats: (.stats // {}), config: (.config // [])}' 2>/dev/null || echo '{"server_info":null,"stats":{},"config":[]}')
@@ -403,7 +405,7 @@ main() {
           [ -z "${p_host}" ] || [ -z "${p_user}" ] && continue
 
           local pgdata owners_arr extra_fields
-          pgdata=$(pg_extra_json "${p_host}" "5432" "${p_user}" "${p_pass}" "${p_dbname:-postgres}" 2>/dev/null || true)
+          pgdata=$(pg_extra_json "${p_host}" "5432" "${p_user}" "${p_pass}" "${p_dbname:-postgres}" 2>&1 || true)
           [ -z "$pgdata" ] && pgdata='{"owners":[],"server_info":null,"stats":{},"config":[]}'
           owners_arr=$(printf '%s' "$pgdata" | jq -c '.owners // []' 2>/dev/null || echo '[]')
           extra_fields=$(printf '%s' "$pgdata" | jq -c '{server_info: .server_info, stats: (.stats // {}), config: (.config // [])}' 2>/dev/null || echo '{"server_info":null,"stats":{},"config":[]}')
@@ -423,7 +425,7 @@ main() {
       [ -z "${host}" ] || [ -z "${user}" ] || [ -z "${pass}" ] && continue
 
       local pgdata owners_arr extra_fields
-      pgdata=$(pg_extra_json "${host}" "5432" "${user}" "${pass}" "${dbname:-postgres}" 2>/dev/null || true)
+      pgdata=$(pg_extra_json "${host}" "5432" "${user}" "${pass}" "${dbname:-postgres}" 2>&1 || true)
       [ -z "$pgdata" ] && pgdata='{"owners":[],"server_info":null,"stats":{},"config":[]}'
       owners_arr=$(printf '%s' "$pgdata" | jq -c '.owners // []' 2>/dev/null || echo '[]')
       extra_fields=$(printf '%s' "$pgdata" | jq -c '{server_info: .server_info, stats: (.stats // {}), config: (.config // [])}' 2>/dev/null || echo '{"server_info":null,"stats":{},"config":[]}')
