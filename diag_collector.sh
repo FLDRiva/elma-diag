@@ -358,7 +358,7 @@ main() {
           [ -z "${host}" ] || [ -z "${user}" ] || [ -z "${pass}" ] && continue
 
           local pgdata owners_arr extra_fields
-          pgdata=$(pg_extra_json "${host}" "${port:-5432}" "${user}" "${pass}" "${dbname:-postgres}" 2>&1 || true)
+          pgdata=$(pg_extra_json "${host}" "${port:-5432}" "${user}" "${pass}" "${dbname:-postgres}" || true)
           [ -z "$pgdata" ] && pgdata='{"owners":[],"server_info":null,"stats":{},"config":[]}'
           owners_arr=$(printf '%s' "$pgdata" | jq -c '.owners // []' 2>/dev/null || echo '[]')
           extra_fields=$(printf '%s' "$pgdata" | jq -c '{server_info: .server_info, stats: (.stats // {}), config: (.config // [])}' 2>/dev/null || echo '{"server_info":null,"stats":{},"config":[]}')
@@ -405,7 +405,7 @@ main() {
           [ -z "${p_host}" ] || [ -z "${p_user}" ] && continue
 
           local pgdata owners_arr extra_fields
-          pgdata=$(pg_extra_json "${p_host}" "5432" "${p_user}" "${p_pass}" "${p_dbname:-postgres}" 2>&1 || true)
+          pgdata=$(pg_extra_json "${p_host}" "5432" "${p_user}" "${p_pass}" "${p_dbname:-postgres}" || true)
           [ -z "$pgdata" ] && pgdata='{"owners":[],"server_info":null,"stats":{},"config":[]}'
           owners_arr=$(printf '%s' "$pgdata" | jq -c '.owners // []' 2>/dev/null || echo '[]')
           extra_fields=$(printf '%s' "$pgdata" | jq -c '{server_info: .server_info, stats: (.stats // {}), config: (.config // [])}' 2>/dev/null || echo '{"server_info":null,"stats":{},"config":[]}')
@@ -425,7 +425,7 @@ main() {
       [ -z "${host}" ] || [ -z "${user}" ] || [ -z "${pass}" ] && continue
 
       local pgdata owners_arr extra_fields
-      pgdata=$(pg_extra_json "${host}" "5432" "${user}" "${pass}" "${dbname:-postgres}" 2>&1 || true)
+      pgdata=$(pg_extra_json "${host}" "5432" "${user}" "${pass}" "${dbname:-postgres}" || true)
       [ -z "$pgdata" ] && pgdata='{"owners":[],"server_info":null,"stats":{},"config":[]}'
       owners_arr=$(printf '%s' "$pgdata" | jq -c '.owners // []' 2>/dev/null || echo '[]')
       extra_fields=$(printf '%s' "$pgdata" | jq -c '{server_info: .server_info, stats: (.stats // {}), config: (.config // [])}' 2>/dev/null || echo '{"server_info":null,"stats":{},"config":[]}')
