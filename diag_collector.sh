@@ -94,17 +94,20 @@ ENDSQL
     raw=$(PGPASSWORD="$pw" psql -h "$h" -p "$p" -U "$u" -d "$db" \
       -t -A --connect-timeout=5 <<< "$sql" 2>/dev/null | grep '"owners":' | tail -1 || true)
   else
-    echo "  psql не найден локально, запускаю временный pod для сбора данных БД..."
-    raw=$(echo "$sql" | kubectl run "elma-diag-pg-$$" \
+    local pod_name="elma-diag-pg-$$-$RANDOM"
+    echo "  Запускаю pod $pod_name для сбора данных БД ($h)..." >&2
+    raw=$(echo "$sql" | kubectl run "$pod_name" \
       --rm --restart=Never \
       --image=postgres:16-alpine \
       --env="PGPASSWORD=$pw" \
       -i \
       -- psql -h "$h" -p "$p" -U "$u" -d "$db" -t -A \
-      2>/dev/null | grep '"owners":' | tail -1 || true)
+      2>&2 | grep '"owners":' | tail -1 || true)
+    echo "  raw[0:80]='${raw:0:80}'" >&2
   fi
 
   if [ -z "$raw" ] || ! printf '%s' "$raw" | jq -e . >/dev/null 2>&1; then
+    echo "  WARN: нет данных от БД $h, используется пустой шаблон" >&2
     printf '{"owners":[],"server_info":null,"stats":{},"config":[]}\n'
     return 0
   fi
