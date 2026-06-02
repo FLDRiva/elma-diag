@@ -61,8 +61,6 @@ detect_namespace() {
 pg_extra_json() {
   local h="$1" p="${2:-5432}" u="$3" pw="$4" db="${5:-postgres}"
 
-  echo "  DEBUG pg_extra_json: h=$h u=$u db=$db psql=$(command -v psql 2>/dev/null || echo 'NOT FOUND')" >&2
-
   # Один SQL-запрос возвращает всё как JSON
   local sql
   sql=$(cat <<'ENDSQL'
@@ -97,19 +95,17 @@ ENDSQL
       -t -A --connect-timeout=5 <<< "$sql" 2>/dev/null | grep '"owners":' | tail -1 || true)
   else
     local pod_name="elma-diag-pg-$$-$RANDOM"
-    echo "  Запускаю pod $pod_name для сбора данных БД ($h)..." >&2
+    echo "  Сбор данных БД через временный pod ($h)..." >&2
     raw=$(echo "$sql" | kubectl run "$pod_name" \
       --rm --restart=Never \
       --image=postgres:16-alpine \
       --env="PGPASSWORD=$pw" \
       -i \
       -- psql -h "$h" -p "$p" -U "$u" -d "$db" -t -A \
-      2>&2 | grep '"owners":' | tail -1 || true)
-    echo "  raw[0:80]='${raw:0:80}'" >&2
+      2>/dev/null | grep '"owners":' | tail -1 || true)
   fi
 
   if [ -z "$raw" ] || ! printf '%s' "$raw" | jq -e . >/dev/null 2>&1; then
-    echo "  WARN: нет данных от БД $h, используется пустой шаблон" >&2
     printf '{"owners":[],"server_info":null,"stats":{},"config":[]}\n'
     return 0
   fi
