@@ -203,41 +203,94 @@ function renderEvents() {
 
 function renderDatabase() {
   if (!currentReport) return noData();
-  
   const db = currentReport.database?.postgresql || [];
-  
-  if (db.length === 0) {
-    return `<div class="no-data">Данные базы не спарсились</div>`;
-  }
+  if (db.length === 0) return `<div class="no-data">Данные базы не спарсились</div>`;
 
-  const rows = db.map(conn => {
-    
-    const owners = (conn.Owners && conn.Owners.length > 0)
-      ? conn.Owners.map(esc).join(', ')
+  return db.map(conn => {
+    const st = conn.stats || {};
+    const si = conn.server_info;
+    const cfg = conn.config || [];
+    const owners = (conn.owners && conn.owners.length > 0)
+      ? conn.owners.map(esc).join(', ')
       : '<span class="muted">—</span>';
-    
-    return `<tr>
-      <td>${esc(conn.host)}</td>
-      <td>${esc(conn.user)}</td>
-      <td><strong>${esc(conn.database)}</strong></td>
-      <td>${owners}</td>
-    </tr>`;
-  }).join('');
 
-  return `
-    <div class="section-title">PG</div>
-    <div class="table-wrap"><table>
-      <thead>
-        <tr>
-          <th>Host</th>
-          <th>User</th>
-          <th>Database</th>
-          <th>Owners</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-  `;
+    // Шапка карточки
+    const header = `
+      <div class="db-card-header">
+        <span class="db-card-host">${esc(conn.host)}</span>
+        <span class="muted">user: <strong>${esc(conn.user)}</strong></span>
+        <span class="muted">db: <strong>${esc(conn.database)}</strong></span>
+        ${conn.connection ? `<span class="ns-badge">${esc(conn.connection)}</span>` : ''}
+        <span class="ns-badge">${esc(conn.secret)}</span>
+      </div>`;
+
+    // Статистика
+    const connPct = (st.max_connections > 0)
+      ? Math.round(st.active_connections / st.max_connections * 100) : null;
+    const chPct = st.cache_hit_ratio || 0;
+    const chClass = chPct >= 95 ? 'ok' : chPct >= 80 ? 'warn' : 'err';
+    const connClass = connPct !== null ? (connPct > 80 ? 'err' : connPct > 60 ? 'warn' : 'ok') : 'ok';
+
+    const statsSection = (st.version || st.db_size_pretty || st.active_connections) ? `
+      <div class="db-section">
+        <div class="section-title">Статистика</div>
+        <div class="db-stats-row">
+          ${st.version ? `<div class="db-stat"><span class="db-stat-label">Версия</span><span class="db-stat-val">${esc(st.version)}</span></div>` : ''}
+          ${st.uptime ? `<div class="db-stat"><span class="db-stat-label">Аптайм</span><span class="db-stat-val">${esc(st.uptime)}</span></div>` : ''}
+          ${st.db_size_pretty ? `<div class="db-stat"><span class="db-stat-label">Размер БД</span><span class="db-stat-val">${esc(st.db_size_pretty)}</span></div>` : ''}
+          ${st.max_connections > 0 ? `
+            <div class="db-stat">
+              <span class="db-stat-label">Коннекты</span>
+              <span class="db-stat-val">${st.active_connections} / ${st.max_connections}</span>
+              <div class="metric-bar"><div class="fill ${connClass}" style="width:${Math.min(connPct,100)}%"></div></div>
+            </div>` : ''}
+          ${chPct > 0 ? `
+            <div class="db-stat">
+              <span class="db-stat-label">Cache Hit</span>
+              <span class="db-stat-val">${chPct}%</span>
+              <div class="metric-bar"><div class="fill ${chClass}" style="width:${Math.min(chPct,100)}%"></div></div>
+            </div>` : ''}
+        </div>
+      </div>` : '';
+
+    // Серверные метрики (только если собрались)
+    const serverSection = si ? `
+      <div class="db-section">
+        <div class="section-title">Сервер</div>
+        <div class="db-stats-row">
+          ${si.cpu_count ? `<div class="db-stat"><span class="db-stat-label">CPU</span><span class="db-stat-val">${si.cpu_count} cores</span></div>` : ''}
+          ${si.total_ram_mb ? `
+            <div class="db-stat">
+              <span class="db-stat-label">RAM</span>
+              <span class="db-stat-val">${(si.total_ram_mb/1024).toFixed(1)} GB${si.free_ram_mb ? ` / свободно ${(si.free_ram_mb/1024).toFixed(1)} GB` : ''}</span>
+              ${si.free_ram_mb ? `<div class="metric-bar"><div class="fill ${((si.total_ram_mb-si.free_ram_mb)/si.total_ram_mb*100)>80?'err':((si.total_ram_mb-si.free_ram_mb)/si.total_ram_mb*100)>60?'warn':'ok'}" style="width:${Math.min((si.total_ram_mb-si.free_ram_mb)/si.total_ram_mb*100,100).toFixed(0)}%"></div></div>` : ''}
+            </div>` : ''}
+          ${si.load_avg ? `<div class="db-stat"><span class="db-stat-label">Load Avg</span><span class="db-stat-val">${esc(si.load_avg)}</span></div>` : ''}
+        </div>
+      </div>` : '';
+
+    // Конфиг
+    const configSection = cfg.length > 0 ? `
+      <div class="db-section">
+        <div class="section-title">Конфиг PostgreSQL</div>
+        <div class="config-grid">
+          ${cfg.map(p => `
+            <div class="config-item">
+              <span class="config-name">${esc(p.name)}</span>
+              <span class="config-val">${esc(p.setting)}${p.unit ? ' ' + esc(p.unit) : ''}</span>
+            </div>`).join('')}
+        </div>
+      </div>` : '';
+
+    // Роли
+    const ownersSection = `
+      <div class="db-section">
+        <div class="section-title">Роли (login)</div>
+        <div style="font-size:13px;color:var(--blue)">${owners}</div>
+      </div>`;
+
+    return `<div class="db-card">${header}${statsSection}${serverSection}${configSection}${ownersSection}</div>`;
+  }).join('');
 }
 
 //Ноды

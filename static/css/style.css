@@ -285,3 +285,95 @@ tr.detail-row td { padding: 0; border-bottom: 1px solid var(--border); }
   color: var(--muted);
   font-style: italic;
 }
+
+/* Прогресс-бар (ноды, БД) */
+.metric-bar {
+  height: 4px;
+  background: var(--bg3);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 4px;
+  min-width: 80px;
+}
+.metric-bar .fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+.metric-bar .fill.ok   { background: var(--green); }
+.metric-bar .fill.warn { background: var(--yellow); }
+.metric-bar .fill.err  { background: var(--red); }
+
+/* БД — карточка подключения */
+.db-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.db-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.db-card-host {
+  font-weight: 600;
+  font-size: 14px;
+}
+.db-section {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.db-section:last-child { border-bottom: none; }
+
+/* Статистика БД */
+.db-stats-row {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.db-stat {
+  min-width: 100px;
+}
+.db-stat-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.db-stat-val {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Конфиг PG */
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px 16px;
+}
+.config-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.config-name {
+  color: var(--muted);
+  font-family: monospace;
+}
+.config-val {
+  font-family: monospace;
+  color: var(--text);
+  font-weight: 500;
+}

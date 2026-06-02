@@ -109,9 +109,36 @@ type Database struct {
 }
 
 type DBConnection struct {
-	Secret string `json:"secret"`
-	Host string `json:"host"`
-	User string `json:"user"`
-	Database string `json:"database"`
-	Owners []string `json:"owners"`
+	Secret     string          `json:"secret"`
+	Connection string          `json:"connection,omitempty"`
+	Host       string          `json:"host"`
+	User       string          `json:"user"`
+	Database   string          `json:"database"`
+	Owners     []string        `json:"owners"`
+	ServerInfo *PGServerInfo   `json:"server_info,omitempty"`
+	Config     []PGConfigParam `json:"config,omitempty"`
+	Stats      *PGStats        `json:"stats,omitempty"`
+}
+
+type PGServerInfo struct {
+	LoadAvg    string `json:"load_avg,omitempty"`
+	TotalRAMMB int    `json:"total_ram_mb,omitempty"`
+	FreeRAMMB  int    `json:"free_ram_mb,omitempty"`
+	CPUCount   int    `json:"cpu_count,omitempty"`
+}
+
+type PGConfigParam struct {
+	Name     string `json:"name"`
+	Setting  string `json:"setting"`
+	Unit     string `json:"unit,omitempty"`
+	Category string `json:"category,omitempty"`
+}
+
+type PGStats struct {
+	Version       string  `json:"version,omitempty"`
+	Uptime        string  `json:"uptime,omitempty"`
+	DBSizePretty  string  `json:"db_size_pretty,omitempty"`
+	ActiveConns   int     `json:"active_connections,omitempty"`
+	MaxConns      int     `json:"max_connections,omitempty"`
+	CacheHitRatio float64 `json:"cache_hit_ratio,omitempty"`
 }

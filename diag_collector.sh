@@ -54,6 +54,112 @@ detect_namespace() {
   exit 1
 }
 
+# Сбор расширенной информации о PG-сервере и конфиге.
+# Аргументы: host port user pass dbname
+# Возвращает JSON с полями server_info, stats, config.
+pg_extra_json() {
+  local h="$1" p="${2:-5432}" u="$3" pw="$4" db="${5:-postgres}"
+  local psa=(-h "$h" -p "$p" -U "$u" -d "$db" -t -A --connect-timeout=3
+              -c "set statement_timeout=3000;")
+
+  # Серверные метрики (только при наличии прав pg_read_server_files / superuser)
+  local load_avg="" total_ram=0 free_ram=0 cpu_count=0
+  local la_raw
+  la_raw=$(PGPASSWORD="$pw" psql "${psa[@]}" \
+           -c "SELECT pg_read_file('/proc/loadavg');" 2>/dev/null \
+           | awk 'NF{print $1" "$2" "$3; exit}' || echo "")
+  if [ -n "$la_raw" ]; then
+    load_avg="$la_raw"
+    local mi ci
+    mi=$(PGPASSWORD="$pw" psql "${psa[@]}" \
+         -c "SELECT pg_read_file('/proc/meminfo');" 2>/dev/null || echo "")
+    if [ -n "$mi" ]; then
+      total_ram=$(echo "$mi" | awk '/^MemTotal/{printf "%d", $2/1024; exit}')
+      free_ram=$(echo "$mi"  | awk '/^MemAvailable/{printf "%d", $2/1024; exit}')
+    fi
+    ci=$(PGPASSWORD="$pw" psql "${psa[@]}" \
+         -c "SELECT pg_read_file('/proc/cpuinfo');" 2>/dev/null || echo "")
+    [ -n "$ci" ] && cpu_count=$(echo "$ci" | grep -c '^processor' || echo 0)
+  fi
+  [[ "$total_ram" =~ ^[0-9]+$ ]] || total_ram=0
+  [[ "$free_ram"  =~ ^[0-9]+$ ]] || free_ram=0
+  [[ "$cpu_count" =~ ^[0-9]+$ ]] || cpu_count=0
+
+  # PG-статистика
+  local ver up sz ac mc ch
+  ver=$(PGPASSWORD="$pw" psql "${psa[@]}" \
+        -c "SELECT split_part(version(),' ',2);" 2>/dev/null | head -1 || echo "")
+  up=$(PGPASSWORD="$pw" psql "${psa[@]}" \
+       -c "SELECT to_char(now()-pg_postmaster_start_time(),'DD\"d\" HH24\"h\" MI\"m\"');" \
+       2>/dev/null | head -1 || echo "")
+  sz=$(PGPASSWORD="$pw" psql "${psa[@]}" \
+       -c "SELECT pg_size_pretty(pg_database_size(current_database()));" \
+       2>/dev/null | head -1 || echo "")
+  ac=$(PGPASSWORD="$pw" psql "${psa[@]}" \
+       -c "SELECT count(*) FROM pg_stat_activity WHERE state IS NOT NULL;" \
+       2>/dev/null | head -1 || echo "0")
+  mc=$(PGPASSWORD="$pw" psql "${psa[@]}" \
+       -c "SELECT setting FROM pg_settings WHERE name='max_connections';" \
+       2>/dev/null | head -1 || echo "0")
+  ch=$(PGPASSWORD="$pw" psql "${psa[@]}" \
+       -c "SELECT CASE WHEN blks_hit+blks_read>0
+                  THEN round(blks_hit*100.0/(blks_hit+blks_read),1)::text
+                  ELSE '0' END
+           FROM pg_stat_database WHERE datname=current_database();" \
+       2>/dev/null | head -1 || echo "0")
+  [[ "$ac" =~ ^[0-9]+$  ]] || ac=0
+  [[ "$mc" =~ ^[0-9]+$  ]] || mc=0
+  [[ "$ch" =~ ^[0-9.]+$ ]] || ch=0
+
+  # Ключевые параметры конфига из pg_settings
+  local cfg_raw cfg_json="[]"
+  cfg_raw=$(PGPASSWORD="$pw" psql -h "$h" -p "$p" -U "$u" -d "$db" \
+    -t -A -F$'\t' --connect-timeout=3 \
+    -c "set statement_timeout=3000;" \
+    -c "SELECT name, setting, coalesce(unit,''), category
+        FROM pg_settings
+        WHERE name IN (
+          'max_connections','shared_buffers','work_mem','maintenance_work_mem',
+          'effective_cache_size','wal_level','checkpoint_completion_target',
+          'max_wal_size','min_wal_size','autovacuum','log_min_duration_statement',
+          'max_worker_processes','max_parallel_workers',
+          'max_parallel_workers_per_gather','temp_file_limit',
+          'effective_io_concurrency','random_page_cost')
+        ORDER BY category, name;" 2>/dev/null || echo "")
+  if [ -n "$cfg_raw" ]; then
+    cfg_json=$(printf '%s\n' "$cfg_raw" | awk -F'\t' 'NF==4{
+      n=$1; s=$2; u=$3; c=$4
+      gsub(/"/, "\\\"", n); gsub(/"/, "\\\"", s)
+      gsub(/"/, "\\\"", u); gsub(/"/, "\\\"", c)
+      printf "{\"name\":\"%s\",\"setting\":\"%s\",\"unit\":\"%s\",\"category\":\"%s\"}\n",n,s,u,c
+    }' | jq -s '.' 2>/dev/null || echo "[]")
+  fi
+
+  jq -n \
+    --arg la "$load_avg" \
+    --argjson tr "$total_ram" --argjson fr "$free_ram" --argjson cc "$cpu_count" \
+    --arg ver "$ver" --arg up "$up" --arg sz "$sz" \
+    --argjson ac "$ac" --argjson mc "$mc" --arg ch "$ch" \
+    --argjson cfg "$cfg_json" \
+    '{
+      server_info: (if ($tr>0 or $cc>0 or $la!="") then {
+        load_avg:     (if $la!="" then $la else null end),
+        total_ram_mb: (if $tr>0 then $tr else null end),
+        free_ram_mb:  (if $fr>0 then $fr else null end),
+        cpu_count:    (if $cc>0 then $cc else null end)
+      } else null end),
+      stats: {
+        version:            (if $ver!="" then $ver else null end),
+        uptime:             (if $up!="" then $up else null end),
+        db_size_pretty:     (if $sz!="" then $sz else null end),
+        active_connections: $ac,
+        max_connections:    $mc,
+        cache_hit_ratio:    ($ch|tonumber)
+      },
+      config: $cfg
+    }'
+}
+
 main() {
   check_deps
   detect_namespace "${1:-}"
@@ -267,13 +373,18 @@ main() {
             owners_arr=$(echo "${owners_raw}" | jq -R -s 'split("\n") | map(select(length > 0))')
           fi
 
+          local extra
+          extra=$(pg_extra_json "${host}" "${port:-5432}" "${user}" "${pass}" "${dbname:-postgres}" 2>/dev/null || echo "{}")
+          [ -z "$extra" ] && extra="{}"
+
           jq -n --arg secret "${secret_name}" \
                 --arg key "${url_key}" \
                 --arg host "${host}" \
                 --arg user "${user}" \
                 --arg dbname "${dbname:-postgres}" \
                 --argjson owners "${owners_arr}" \
-                '{secret: $secret, connection: $key, host: $host, user: $user, database: $dbname, owners: $owners}' >> "${tmp_dbinfo}"
+                --argjson extra "${extra}" \
+                '{secret: $secret, connection: $key, host: $host, user: $user, database: $dbname, owners: $owners} + $extra' >> "${tmp_dbinfo}"
         done <<< "${url_keys}"
         [ -s "${tmp_dbinfo}" ] && continue
       fi
@@ -323,13 +434,18 @@ main() {
             owners_arr=$(echo "${owners_raw}" | jq -R -s 'split("\n") | map(select(length > 0))')
           fi
 
+          local extra
+          extra=$(pg_extra_json "${p_host}" "5432" "${p_user}" "${p_pass}" "${p_dbname:-postgres}" 2>/dev/null || echo "{}")
+          [ -z "$extra" ] && extra="{}"
+
           jq -n --arg secret "${secret_name}" \
                 --arg prefix "${prefix}" \
                 --arg host "${p_host}" \
                 --arg user "${p_user}" \
                 --arg dbname "${p_dbname:-postgres}" \
                 --argjson owners "${owners_arr}" \
-                '{secret: $secret, connection: $prefix, host: $host, user: $user, database: $dbname, owners: $owners}' >> "${tmp_dbinfo}"
+                --argjson extra "${extra}" \
+                '{secret: $secret, connection: $prefix, host: $host, user: $user, database: $dbname, owners: $owners} + $extra' >> "${tmp_dbinfo}"
         done <<< "${prefixes}"
         [ -s "${tmp_dbinfo}" ] && continue
       fi
@@ -352,12 +468,17 @@ main() {
         owners_arr=$(echo "${owners_raw}" | jq -R -s 'split("\n") | map(select(length > 0))')
       fi
 
+      local extra
+      extra=$(pg_extra_json "${host}" "5432" "${user}" "${pass}" "${dbname:-postgres}" 2>/dev/null || echo "{}")
+      [ -z "$extra" ] && extra="{}"
+
       jq -n --arg secret "${secret_name}" \
             --arg host "${host}" \
             --arg user "${user}" \
             --arg dbname "${dbname:-postgres}" \
             --argjson owners "${owners_arr}" \
-            '{secret: $secret, host: $host, user: $user, database: $dbname, owners: $owners}' >> "${tmp_dbinfo}"
+            --argjson extra "${extra}" \
+            '{secret: $secret, host: $host, user: $user, database: $dbname, owners: $owners} + $extra' >> "${tmp_dbinfo}"
     done <<< "${pg_secrets}"
 
     if [ -s "${tmp_dbinfo}" ]; then
