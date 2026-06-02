@@ -54,110 +54,109 @@ detect_namespace() {
   exit 1
 }
 
-# Сбор расширенной информации о PG-сервере и конфиге.
+# Собирает всю информацию о БД одним SQL-запросом.
 # Аргументы: host port user pass dbname
-# Возвращает JSON с полями server_info, stats, config.
+# Возвращает JSON с полями owners, server_info, stats, config.
+# Если psql не установлен локально — запускает временный под через kubectl run.
 pg_extra_json() {
   local h="$1" p="${2:-5432}" u="$3" pw="$4" db="${5:-postgres}"
-  local psa=(-h "$h" -p "$p" -U "$u" -d "$db" -t -A --connect-timeout=3
-              -c "set statement_timeout=3000;")
 
-  # Серверные метрики (только при наличии прав pg_read_server_files / superuser)
-  local load_avg="" total_ram=0 free_ram=0 cpu_count=0
-  local la_raw
-  la_raw=$(PGPASSWORD="$pw" psql "${psa[@]}" \
-           -c "SELECT pg_read_file('/proc/loadavg');" 2>/dev/null \
-           | awk 'NF{print $1" "$2" "$3; exit}' || echo "")
-  if [ -n "$la_raw" ]; then
-    load_avg="$la_raw"
-    local mi ci
-    mi=$(PGPASSWORD="$pw" psql "${psa[@]}" \
-         -c "SELECT pg_read_file('/proc/meminfo');" 2>/dev/null || echo "")
-    if [ -n "$mi" ]; then
-      total_ram=$(echo "$mi" | awk '/^MemTotal/{printf "%d", $2/1024; exit}')
-      free_ram=$(echo "$mi"  | awk '/^MemAvailable/{printf "%d", $2/1024; exit}')
+  # Один SQL-запрос возвращает всё как JSON
+  local sql
+  sql=$(cat <<'ENDSQL'
+SET statement_timeout=5000;
+SELECT row_to_json(t) FROM (SELECT
+  (SELECT COALESCE(json_agg(rolname ORDER BY rolname),'[]'::json)
+   FROM pg_roles WHERE rolcanlogin=true) AS owners,
+  split_part(version(),' ',2) AS version,
+  to_char(now()-pg_postmaster_start_time(),'DD"d" HH24"h" MI"m"') AS uptime,
+  pg_size_pretty(pg_database_size(current_database())) AS db_size_pretty,
+  (SELECT count(*)::int FROM pg_stat_activity WHERE state IS NOT NULL) AS active_connections,
+  (SELECT setting::int FROM pg_settings WHERE name='max_connections') AS max_connections,
+  (SELECT CASE WHEN blks_hit+blks_read>0
+    THEN round(blks_hit*100.0/(blks_hit+blks_read),1)::numeric
+    ELSE 0 END FROM pg_stat_database WHERE datname=current_database()) AS cache_hit_ratio,
+  (SELECT COALESCE(json_agg(x ORDER BY x->>'category',x->>'name'),'[]'::json)
+   FROM (SELECT json_build_object(
+     'name',name,'setting',setting,'unit',coalesce(unit,''),'category',category) AS x
+     FROM pg_settings WHERE name IN (
+       'max_connections','shared_buffers','work_mem','maintenance_work_mem',
+       'effective_cache_size','wal_level','checkpoint_completion_target',
+       'max_wal_size','min_wal_size','autovacuum','log_min_duration_statement',
+       'max_worker_processes','max_parallel_workers','max_parallel_workers_per_gather',
+       'temp_file_limit','effective_io_concurrency','random_page_cost')) cfg) AS config
+) t;
+ENDSQL
+)
+
+  local raw=""
+  if command -v psql &>/dev/null; then
+    # psql доступен локально
+    raw=$(PGPASSWORD="$pw" psql -h "$h" -p "$p" -U "$u" -d "$db" \
+      -t -A --connect-timeout=5 <<< "$sql" 2>/dev/null | grep '^{' | tail -1)
+  else
+    # Запускаем временный под с postgres-клиентом
+    echo "  psql не найден локально, запускаю временный pod для сбора данных БД..."
+    raw=$(echo "$sql" | kubectl run "elma-diag-pg-$RANDOM" \
+      --rm --restart=Never \
+      --image=postgres:16-alpine \
+      --env="PGPASSWORD=$pw" \
+      -i --quiet \
+      -- psql -h "$h" -p "$p" -U "$u" -d "$db" -t -A \
+      2>/dev/null | grep '^{' | tail -1)
+  fi
+
+  # Если запрос не удался — возвращаем пустую структуру
+  if [ -z "$raw" ] || ! echo "$raw" | jq -e . >/dev/null 2>&1; then
+    jq -n '{owners:[], server_info:null, stats:{}, config:[]}'
+    return
+  fi
+
+  # Собираем server_info если psql доступен локально (требует суперпользователя)
+  local si="null"
+  if command -v psql &>/dev/null; then
+    local la_raw
+    la_raw=$(PGPASSWORD="$pw" psql -h "$h" -p "$p" -U "$u" -d "$db" \
+      -t -A --connect-timeout=3 \
+      -c "SET statement_timeout=3000;" \
+      -c "SELECT pg_read_file('/proc/loadavg');" 2>/dev/null \
+      | awk 'NF{print $1" "$2" "$3; exit}')
+    if [ -n "$la_raw" ]; then
+      local mi ci tr=0 fr=0 cc=0
+      mi=$(PGPASSWORD="$pw" psql -h "$h" -p "$p" -U "$u" -d "$db" -t -A \
+        --connect-timeout=3 -c "SET statement_timeout=3000;" \
+        -c "SELECT pg_read_file('/proc/meminfo');" 2>/dev/null || echo "")
+      [ -n "$mi" ] && {
+        tr=$(echo "$mi" | awk '/^MemTotal/{printf "%d",$2/1024;exit}')
+        fr=$(echo "$mi" | awk '/^MemAvailable/{printf "%d",$2/1024;exit}')
+      }
+      ci=$(PGPASSWORD="$pw" psql -h "$h" -p "$p" -U "$u" -d "$db" -t -A \
+        --connect-timeout=3 -c "SET statement_timeout=3000;" \
+        -c "SELECT pg_read_file('/proc/cpuinfo');" 2>/dev/null || echo "")
+      [ -n "$ci" ] && cc=$(echo "$ci" | grep -c '^processor' || echo 0)
+      [[ "$tr" =~ ^[0-9]+$ ]] || tr=0
+      [[ "$fr" =~ ^[0-9]+$ ]] || fr=0
+      [[ "$cc" =~ ^[0-9]+$ ]] || cc=0
+      si=$(jq -n --arg la "$la_raw" --argjson tr "$tr" --argjson fr "$fr" --argjson cc "$cc" \
+        '{load_avg:$la, total_ram_mb:(if $tr>0 then $tr else null end),
+          free_ram_mb:(if $fr>0 then $fr else null end),
+          cpu_count:(if $cc>0 then $cc else null end)}')
     fi
-    ci=$(PGPASSWORD="$pw" psql "${psa[@]}" \
-         -c "SELECT pg_read_file('/proc/cpuinfo');" 2>/dev/null || echo "")
-    [ -n "$ci" ] && cpu_count=$(echo "$ci" | grep -c '^processor' || echo 0)
-  fi
-  [[ "$total_ram" =~ ^[0-9]+$ ]] || total_ram=0
-  [[ "$free_ram"  =~ ^[0-9]+$ ]] || free_ram=0
-  [[ "$cpu_count" =~ ^[0-9]+$ ]] || cpu_count=0
-
-  # PG-статистика
-  local ver up sz ac mc ch
-  ver=$(PGPASSWORD="$pw" psql "${psa[@]}" \
-        -c "SELECT split_part(version(),' ',2);" 2>/dev/null | head -1 || echo "")
-  up=$(PGPASSWORD="$pw" psql "${psa[@]}" \
-       -c "SELECT to_char(now()-pg_postmaster_start_time(),'DD\"d\" HH24\"h\" MI\"m\"');" \
-       2>/dev/null | head -1 || echo "")
-  sz=$(PGPASSWORD="$pw" psql "${psa[@]}" \
-       -c "SELECT pg_size_pretty(pg_database_size(current_database()));" \
-       2>/dev/null | head -1 || echo "")
-  ac=$(PGPASSWORD="$pw" psql "${psa[@]}" \
-       -c "SELECT count(*) FROM pg_stat_activity WHERE state IS NOT NULL;" \
-       2>/dev/null | head -1 || echo "0")
-  mc=$(PGPASSWORD="$pw" psql "${psa[@]}" \
-       -c "SELECT setting FROM pg_settings WHERE name='max_connections';" \
-       2>/dev/null | head -1 || echo "0")
-  ch=$(PGPASSWORD="$pw" psql "${psa[@]}" \
-       -c "SELECT CASE WHEN blks_hit+blks_read>0
-                  THEN round(blks_hit*100.0/(blks_hit+blks_read),1)::text
-                  ELSE '0' END
-           FROM pg_stat_database WHERE datname=current_database();" \
-       2>/dev/null | head -1 || echo "0")
-  [[ "$ac" =~ ^[0-9]+$  ]] || ac=0
-  [[ "$mc" =~ ^[0-9]+$  ]] || mc=0
-  [[ "$ch" =~ ^[0-9.]+$ ]] || ch=0
-
-  # Ключевые параметры конфига из pg_settings
-  local cfg_raw cfg_json="[]"
-  cfg_raw=$(PGPASSWORD="$pw" psql -h "$h" -p "$p" -U "$u" -d "$db" \
-    -t -A -F$'\t' --connect-timeout=3 \
-    -c "set statement_timeout=3000;" \
-    -c "SELECT name, setting, coalesce(unit,''), category
-        FROM pg_settings
-        WHERE name IN (
-          'max_connections','shared_buffers','work_mem','maintenance_work_mem',
-          'effective_cache_size','wal_level','checkpoint_completion_target',
-          'max_wal_size','min_wal_size','autovacuum','log_min_duration_statement',
-          'max_worker_processes','max_parallel_workers',
-          'max_parallel_workers_per_gather','temp_file_limit',
-          'effective_io_concurrency','random_page_cost')
-        ORDER BY category, name;" 2>/dev/null || echo "")
-  if [ -n "$cfg_raw" ]; then
-    cfg_json=$(printf '%s\n' "$cfg_raw" | awk -F'\t' 'NF==4{
-      n=$1; s=$2; u=$3; c=$4
-      gsub(/"/, "\\\"", n); gsub(/"/, "\\\"", s)
-      gsub(/"/, "\\\"", u); gsub(/"/, "\\\"", c)
-      printf "{\"name\":\"%s\",\"setting\":\"%s\",\"unit\":\"%s\",\"category\":\"%s\"}\n",n,s,u,c
-    }' | jq -s '.' 2>/dev/null || echo "[]")
   fi
 
-  jq -n \
-    --arg la "$load_avg" \
-    --argjson tr "$total_ram" --argjson fr "$free_ram" --argjson cc "$cpu_count" \
-    --arg ver "$ver" --arg up "$up" --arg sz "$sz" \
-    --argjson ac "$ac" --argjson mc "$mc" --arg ch "$ch" \
-    --argjson cfg "$cfg_json" \
-    '{
-      server_info: (if ($tr>0 or $cc>0 or $la!="") then {
-        load_avg:     (if $la!="" then $la else null end),
-        total_ram_mb: (if $tr>0 then $tr else null end),
-        free_ram_mb:  (if $fr>0 then $fr else null end),
-        cpu_count:    (if $cc>0 then $cc else null end)
-      } else null end),
-      stats: {
-        version:            (if $ver!="" then $ver else null end),
-        uptime:             (if $up!="" then $up else null end),
-        db_size_pretty:     (if $sz!="" then $sz else null end),
-        active_connections: $ac,
-        max_connections:    $mc,
-        cache_hit_ratio:    ($ch|tonumber)
-      },
-      config: $cfg
-    }'
+  jq -n --argjson d "$raw" --argjson si "$si" '{
+    owners:      ($d.owners // []),
+    server_info: $si,
+    stats: {
+      version:            ($d.version // null),
+      uptime:             ($d.uptime // null),
+      db_size_pretty:     ($d.db_size_pretty // null),
+      active_connections: ($d.active_connections // 0),
+      max_connections:    ($d.max_connections // 0),
+      cache_hit_ratio:    ($d.cache_hit_ratio // 0)
+    },
+    config: ($d.config // [])
+  }'
 }
 
 main() {
@@ -356,26 +355,10 @@ main() {
 
           [ -z "${host}" ] || [ -z "${user}" ] || [ -z "${pass}" ] && continue
 
-          local owners_raw
-          owners_raw=$(PGPASSWORD="${pass}" psql \
-            -h "${host}" \
-            -p "${port:-5432}" \
-            -U "${user}" \
-            -d "${dbname:-postgres}" \
-            -t -A \
-            --connect-timeout=3 \
-            -c "set statement_timeout=2000;" \
-            -c "SELECT rolname FROM pg_roles WHERE rolcanlogin = true ORDER BY rolname;" \
-            2>/dev/null || echo "")
-
-          local owners_arr="[]"
-          if [ -n "${owners_raw}" ]; then
-            owners_arr=$(echo "${owners_raw}" | jq -R -s 'split("\n") | map(select(length > 0))')
-          fi
-
-          local extra
-          extra=$(pg_extra_json "${host}" "${port:-5432}" "${user}" "${pass}" "${dbname:-postgres}" 2>/dev/null || echo "{}")
-          [ -z "$extra" ] && extra="{}"
+          local pgdata owners_arr extra_fields
+          pgdata=$(pg_extra_json "${host}" "${port:-5432}" "${user}" "${pass}" "${dbname:-postgres}")
+          owners_arr=$(echo "$pgdata" | jq -c '.owners // []')
+          extra_fields=$(echo "$pgdata" | jq -c '{server_info, stats, config}')
 
           jq -n --arg secret "${secret_name}" \
                 --arg key "${url_key}" \
@@ -383,7 +366,7 @@ main() {
                 --arg user "${user}" \
                 --arg dbname "${dbname:-postgres}" \
                 --argjson owners "${owners_arr}" \
-                --argjson extra "${extra}" \
+                --argjson extra "${extra_fields}" \
                 '{secret: $secret, connection: $key, host: $host, user: $user, database: $dbname, owners: $owners} + $extra' >> "${tmp_dbinfo}"
         done <<< "${url_keys}"
         [ -s "${tmp_dbinfo}" ] && continue
@@ -418,25 +401,10 @@ main() {
 
           [ -z "${p_host}" ] || [ -z "${p_user}" ] && continue
 
-          local owners_raw
-          owners_raw=$(PGPASSWORD="${p_pass}" psql \
-            -h "${p_host}" \
-            -U "${p_user}" \
-            -d "${p_dbname:-postgres}" \
-            -t -A \
-            --connect-timeout=3 \
-            -c "set statement_timeout=2000;" \
-            -c "SELECT rolname FROM pg_roles WHERE rolcanlogin = true ORDER BY rolname;" \
-            2>/dev/null || echo "")
-
-          local owners_arr="[]"
-          if [ -n "${owners_raw}" ]; then
-            owners_arr=$(echo "${owners_raw}" | jq -R -s 'split("\n") | map(select(length > 0))')
-          fi
-
-          local extra
-          extra=$(pg_extra_json "${p_host}" "5432" "${p_user}" "${p_pass}" "${p_dbname:-postgres}" 2>/dev/null || echo "{}")
-          [ -z "$extra" ] && extra="{}"
+          local pgdata owners_arr extra_fields
+          pgdata=$(pg_extra_json "${p_host}" "5432" "${p_user}" "${p_pass}" "${p_dbname:-postgres}")
+          owners_arr=$(echo "$pgdata" | jq -c '.owners // []')
+          extra_fields=$(echo "$pgdata" | jq -c '{server_info, stats, config}')
 
           jq -n --arg secret "${secret_name}" \
                 --arg prefix "${prefix}" \
@@ -444,7 +412,7 @@ main() {
                 --arg user "${p_user}" \
                 --arg dbname "${p_dbname:-postgres}" \
                 --argjson owners "${owners_arr}" \
-                --argjson extra "${extra}" \
+                --argjson extra "${extra_fields}" \
                 '{secret: $secret, connection: $prefix, host: $host, user: $user, database: $dbname, owners: $owners} + $extra' >> "${tmp_dbinfo}"
         done <<< "${prefixes}"
         [ -s "${tmp_dbinfo}" ] && continue
@@ -452,32 +420,17 @@ main() {
 
       [ -z "${host}" ] || [ -z "${user}" ] || [ -z "${pass}" ] && continue
 
-      local owners_raw
-      owners_raw=$(PGPASSWORD="${pass}" psql \
-        -h "${host}" \
-        -U "${user}" \
-        -d "${dbname:-postgres}" \
-        -t -A \
-        --connect-timeout=3 \
-        -c "set statement_timeout=2000;" \
-        -c "SELECT rolname FROM pg_roles WHERE rolcanlogin = true ORDER BY rolname;" \
-        2>/dev/null || echo "")
-
-      local owners_arr="[]"
-      if [ -n "${owners_raw}" ]; then
-        owners_arr=$(echo "${owners_raw}" | jq -R -s 'split("\n") | map(select(length > 0))')
-      fi
-
-      local extra
-      extra=$(pg_extra_json "${host}" "5432" "${user}" "${pass}" "${dbname:-postgres}" 2>/dev/null || echo "{}")
-      [ -z "$extra" ] && extra="{}"
+      local pgdata owners_arr extra_fields
+      pgdata=$(pg_extra_json "${host}" "5432" "${user}" "${pass}" "${dbname:-postgres}")
+      owners_arr=$(echo "$pgdata" | jq -c '.owners // []')
+      extra_fields=$(echo "$pgdata" | jq -c '{server_info, stats, config}')
 
       jq -n --arg secret "${secret_name}" \
             --arg host "${host}" \
             --arg user "${user}" \
             --arg dbname "${dbname:-postgres}" \
             --argjson owners "${owners_arr}" \
-            --argjson extra "${extra}" \
+            --argjson extra "${extra_fields}" \
             '{secret: $secret, host: $host, user: $user, database: $dbname, owners: $owners} + $extra' >> "${tmp_dbinfo}"
     done <<< "${pg_secrets}"
 
