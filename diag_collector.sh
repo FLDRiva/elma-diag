@@ -91,25 +91,22 @@ ENDSQL
 
   local raw=""
   if command -v psql &>/dev/null; then
-    # psql доступен локально
     raw=$(PGPASSWORD="$pw" psql -h "$h" -p "$p" -U "$u" -d "$db" \
-      -t -A --connect-timeout=5 <<< "$sql" 2>/dev/null | grep '^{' | tail -1)
+      -t -A --connect-timeout=5 <<< "$sql" 2>/dev/null | grep '"owners":' | tail -1 || true)
   else
-    # Запускаем временный под с postgres-клиентом
     echo "  psql не найден локально, запускаю временный pod для сбора данных БД..."
-    raw=$(echo "$sql" | kubectl run "elma-diag-pg-$RANDOM" \
+    raw=$(echo "$sql" | kubectl run "elma-diag-pg-$$" \
       --rm --restart=Never \
       --image=postgres:16-alpine \
       --env="PGPASSWORD=$pw" \
-      -i --quiet \
+      -i \
       -- psql -h "$h" -p "$p" -U "$u" -d "$db" -t -A \
-      2>/dev/null | grep '^{' | tail -1)
+      2>/dev/null | grep '"owners":' | tail -1 || true)
   fi
 
-  # Если запрос не удался — возвращаем пустую структуру
-  if [ -z "$raw" ] || ! echo "$raw" | jq -e . >/dev/null 2>&1; then
-    jq -n '{owners:[], server_info:null, stats:{}, config:[]}'
-    return
+  if [ -z "$raw" ] || ! printf '%s' "$raw" | jq -e . >/dev/null 2>&1; then
+    printf '{"owners":[],"server_info":null,"stats":{},"config":[]}\n'
+    return 0
   fi
 
   # Собираем server_info если psql доступен локально (требует суперпользователя)
@@ -356,9 +353,10 @@ main() {
           [ -z "${host}" ] || [ -z "${user}" ] || [ -z "${pass}" ] && continue
 
           local pgdata owners_arr extra_fields
-          pgdata=$(pg_extra_json "${host}" "${port:-5432}" "${user}" "${pass}" "${dbname:-postgres}")
-          owners_arr=$(echo "$pgdata" | jq -c '.owners // []')
-          extra_fields=$(echo "$pgdata" | jq -c '{server_info, stats, config}')
+          pgdata=$(pg_extra_json "${host}" "${port:-5432}" "${user}" "${pass}" "${dbname:-postgres}" 2>/dev/null || true)
+          [ -z "$pgdata" ] && pgdata='{"owners":[],"server_info":null,"stats":{},"config":[]}'
+          owners_arr=$(printf '%s' "$pgdata" | jq -c '.owners // []' 2>/dev/null || echo '[]')
+          extra_fields=$(printf '%s' "$pgdata" | jq -c '{server_info: .server_info, stats: (.stats // {}), config: (.config // [])}' 2>/dev/null || echo '{"server_info":null,"stats":{},"config":[]}')
 
           jq -n --arg secret "${secret_name}" \
                 --arg key "${url_key}" \
@@ -402,9 +400,10 @@ main() {
           [ -z "${p_host}" ] || [ -z "${p_user}" ] && continue
 
           local pgdata owners_arr extra_fields
-          pgdata=$(pg_extra_json "${p_host}" "5432" "${p_user}" "${p_pass}" "${p_dbname:-postgres}")
-          owners_arr=$(echo "$pgdata" | jq -c '.owners // []')
-          extra_fields=$(echo "$pgdata" | jq -c '{server_info, stats, config}')
+          pgdata=$(pg_extra_json "${p_host}" "5432" "${p_user}" "${p_pass}" "${p_dbname:-postgres}" 2>/dev/null || true)
+          [ -z "$pgdata" ] && pgdata='{"owners":[],"server_info":null,"stats":{},"config":[]}'
+          owners_arr=$(printf '%s' "$pgdata" | jq -c '.owners // []' 2>/dev/null || echo '[]')
+          extra_fields=$(printf '%s' "$pgdata" | jq -c '{server_info: .server_info, stats: (.stats // {}), config: (.config // [])}' 2>/dev/null || echo '{"server_info":null,"stats":{},"config":[]}')
 
           jq -n --arg secret "${secret_name}" \
                 --arg prefix "${prefix}" \
@@ -421,9 +420,10 @@ main() {
       [ -z "${host}" ] || [ -z "${user}" ] || [ -z "${pass}" ] && continue
 
       local pgdata owners_arr extra_fields
-      pgdata=$(pg_extra_json "${host}" "5432" "${user}" "${pass}" "${dbname:-postgres}")
-      owners_arr=$(echo "$pgdata" | jq -c '.owners // []')
-      extra_fields=$(echo "$pgdata" | jq -c '{server_info, stats, config}')
+      pgdata=$(pg_extra_json "${host}" "5432" "${user}" "${pass}" "${dbname:-postgres}" 2>/dev/null || true)
+      [ -z "$pgdata" ] && pgdata='{"owners":[],"server_info":null,"stats":{},"config":[]}'
+      owners_arr=$(printf '%s' "$pgdata" | jq -c '.owners // []' 2>/dev/null || echo '[]')
+      extra_fields=$(printf '%s' "$pgdata" | jq -c '{server_info: .server_info, stats: (.stats // {}), config: (.config // [])}' 2>/dev/null || echo '{"server_info":null,"stats":{},"config":[]}')
 
       jq -n --arg secret "${secret_name}" \
             --arg host "${host}" \
